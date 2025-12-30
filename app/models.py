@@ -9,4 +9,4 @@ class Topic(BaseModel):
     id: int
     category_id: int
     title: str
-    level: str
+    level: str 
