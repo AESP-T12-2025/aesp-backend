@@ -1,0 +1,53 @@
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
+from typing import List, Optional
+
+app = FastAPI(
+    title="AESP - AI English Speaking Platform",
+    description="API Documentation cho nền tảng luyện nói tiếng Anh",
+    version="1.0.0"
+)
+
+# --- Định nghĩa Schema dữ liệu (Pydantic Models) ---
+class Category(BaseModel):
+    id: int
+    name: str
+    description: str
+
+class Topic(BaseModel):
+    id: int
+    category_id: int
+    title: str
+    difficulty: str  # Ví dụ: Beginner, Intermediate, Advanced
+
+# --- Dữ liệu mẫu (Mock Data) ---
+categories_db = [
+    {"id": 1, "name": "Daily Conversation", "description": "Giao tiếp cơ bản hàng ngày"},
+    {"id": 2, "name": "IELTS Speaking", "description": "Luyện thi nói IELTS Part 1, 2, 3"}
+]
+
+topics_db = [
+    {"id": 101, "category_id": 1, "title": "Ordering Food at a Restaurant", "difficulty": "Beginner"},
+    {"id": 102, "category_id": 1, "title": "Asking for Directions", "difficulty": "Beginner"},
+    {"id": 201, "category_id": 2, "title": "Environmental Protection", "difficulty": "Advanced"}
+]
+
+# --- API Endpoints ---
+
+@app.get("/categories", response_model=List[Category], tags=["Categories"])
+async def get_categories():
+    """
+    Lấy danh sách các danh mục (Categories).
+    """
+    return categories_db
+
+@app.get("/topics", response_model=List[Topic], tags=["Topics"])
+async def get_topics(category_id: Optional[int] = Query(None, description="Lọc chủ đề theo ID danh mục")):
+    """
+    Lấy danh sách các chủ đề (Topics). 
+    Nếu có category_id, chỉ trả về các topic thuộc danh mục đó.
+    """
+    if category_id:
+        filtered_topics = [t for t in topics_db if t["category_id"] == category_id]
+        return filtered_topics
+    return topics_db
