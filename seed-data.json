@@ -1,0 +1,16 @@
+[
+  {
+    "id": "1",
+    "title": "At the Coffee Shop",
+    "description": "Practice ordering your favorite drink.",
+    "level": "Beginner",
+    "role": "Barista"
+  },
+  {
+    "id": "2",
+    "title": "Job Interview",
+    "description": "Practice professional English for your career.",
+    "level": "Intermediate",
+    "role": "Hiring Manager"
+  }
+]
