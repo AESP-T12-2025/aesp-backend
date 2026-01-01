@@ -1,0 +1,32 @@
+/* Giao diện hiển thị chi tiết kịch bản */
+.scenario-detail {
+  padding: 20px;
+  border-radius: 12px;
+  background-color: #f9f9f9;
+  border: 1px solid #ddd;
+}
+
+.scenario-title {
+  color: #2c3e50;
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.badge-level {
+  display: inline-block;
+  padding: 4px 12px;
+  background-color: #4caf50;
+  color: white;
+  border-radius: 20px;
+  font-size: 14px;
+}
+
+.start-button {
+  margin-top: 15px;
+  padding: 10px 25px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
