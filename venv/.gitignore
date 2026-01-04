@@ -1,3 +1,10 @@
-.env
+# Bỏ qua môi trường ảo
 venv/
+.venv/
+
+# Bỏ qua file chứa mật khẩu (QUAN TRỌNG)
+.env
+
+# Bỏ qua file rác Python
 __pycache__/
+*.pyc
