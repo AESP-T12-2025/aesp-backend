@@ -111,5 +111,5 @@ uvicorn app.main:app --reload
 ---
 
 ## 🤝 Liên hệ
-Admin/Leader: **Bùi Quang Long**
+Leader: **Bùi Quang Long**
 *(Nếu server lỗi hoặc DB sập, vui lòng ping trực tiếp)*
