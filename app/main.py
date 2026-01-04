@@ -15,6 +15,22 @@ Base.metadata.create_all(bind=engine)
 # Khởi tạo ứng dụng
 app = FastAPI()
 
+# Cấu hình CORS
+from fastapi.middleware.cors import CORSMiddleware
+origins = [
+    "http://localhost",
+    "http://localhost:3000", # Next.js dev server
+    "https://your-frontend-deployment-url.com", # Production URL (Update later)
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Kết nối router
 app.include_router(upload.router)
 app.include_router(auth.router)

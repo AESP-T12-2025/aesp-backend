@@ -43,6 +43,21 @@ def get_scenario(
         raise HTTPException(status_code=404, detail="Scenario not found")
     return scenario
 
+@router.get("/scenarios/{id}/vocab")
+def get_scenario_vocab(
+    id: int,
+    db: Session = Depends(database.get_db)
+):
+    scenario = db.query(Scenario).filter(Scenario.scenario_id == id).first()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    # Trả về key_phrases (dạng JSON) của kịch bản
+    return {
+        "scenario_id": id,
+        "vocabulary": scenario.key_phrases or {}
+    }
+
 # --- Admin Routes (Protected) ---
 
 from app.schemas.content import TopicCreate, ScenarioCreate
@@ -101,11 +116,43 @@ def delete_scenario(
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    # check_admin(current_user)
-    scenario = db.query(Scenario).filter(Scenario.scenario_id == id).first()
-    if not scenario:
-        raise HTTPException(status_code=404, detail="Scenario not found")
-    
     db.delete(scenario)
     db.commit()
     return {"message": "Scenario deleted successfully"}
+
+# --- Speaking Session API (Practice) ---
+from pydantic import BaseModel
+from datetime import datetime
+
+class SpeakingSessionCreate(BaseModel):
+    scenario_id: int
+    start_time: datetime = None # Optional, default to now in DB if None
+
+@router.post("/speaking-sessions")
+def create_speaking_session(
+    session_in: SpeakingSessionCreate,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    from app.models.content import SpeakingSession
+    
+    # Verify scenario exists
+    scenario = db.query(Scenario).filter(Scenario.scenario_id == session_in.scenario_id).first()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    new_session = SpeakingSession(
+        user_id=current_user.user_id,
+        scenario_id=session_in.scenario_id,
+        start_time=session_in.start_time or datetime.now(),
+        status="IN_PROGRESS" # Optional field if needed later, for now just create
+    )
+    db.add(new_session)
+    db.commit()
+    db.refresh(new_session)
+    
+    return {
+        "session_id": new_session.session_id,
+        "message": "Session started successfully",
+        "scenario_title": scenario.title
+    }

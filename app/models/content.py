@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SqlEnum, JSON
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SqlEnum, JSON, DateTime
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from app.core.database import Base
 import enum
 
@@ -40,3 +41,14 @@ class Scenario(Base):
     key_phrases = Column(JSON, nullable=True) # Gợi ý cho Advanced learners (JSONB in ERD, JSON in SQLAlchemy general)
 
     topic = relationship("Topic", back_populates="scenarios")
+
+class SpeakingSession(Base):
+    __tablename__ = "speaking_sessions"
+
+    session_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    scenario_id = Column(Integer, ForeignKey("scenarios.scenario_id"), nullable=False)
+    start_time = Column(DateTime(timezone=True), server_default=func.now())
+    end_time = Column(DateTime(timezone=True), nullable=True)
+    score = Column(Integer, nullable=True) # Điểm số đánh giá (0-100)
+    audio_url = Column(String, nullable=True) # Link file ghi âm (nếu có)
