@@ -11,3 +11,5 @@ python-dotenv
 pydantic
 pydantic-settings
 email-validator
+google-generativeai
+edge-tts
