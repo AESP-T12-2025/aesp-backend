@@ -23,7 +23,12 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Cấu hình CORS
 from fastapi.middleware.cors import CORSMiddleware
-origins = ["*"]
+origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:5173",
+    "https://aesp-frontend.vercel.app",
+]
 
 app.add_middleware(
     CORSMiddleware,
