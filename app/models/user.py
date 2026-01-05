@@ -17,7 +17,7 @@ class User(Base):
 
     user_id = Column(Integer, primary_key=True, index=True) # Renamed from id to user_id to match ERD
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=True) # Nullable for Google Auth
+    password_hash = Column(String, nullable=True) # Nullable for Google Auth
     full_name = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
     role = Column(SqlEnum(UserRole), default=UserRole.LEARNER)

@@ -32,6 +32,19 @@ def get_topics(
     topics = query.offset(skip).limit(limit).all()
     return topics
 
+@router.get("/scenarios", response_model=List[ScenarioResponse])
+def get_scenarios(
+    topic_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(database.get_db),
+):
+    query = db.query(Scenario)
+    if topic_id:
+        query = query.filter(Scenario.topic_id == topic_id)
+    scenarios = query.offset(skip).limit(limit).all()
+    return scenarios
+
 @router.get("/scenarios/{id}", response_model=ScenarioResponse)
 def get_scenario(
     id: int,
