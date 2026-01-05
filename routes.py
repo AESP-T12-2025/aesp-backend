@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from typing import List
-from .schemas import SpeakingSession, VocabItem
+from app.schemas.speaking import SpeakingSession, VocabItem
 
 app = FastAPI(title="AESP - AI English Speaking Practice Platform")
 
