@@ -133,6 +133,26 @@ def create_scenario(
     db.refresh(new_scenario)
     return new_scenario
 
+@router.put("/scenarios/{id}", response_model=ScenarioResponse)
+def update_scenario(
+    id: int,
+    scenario_in: ScenarioCreate,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    # check_admin(current_user)
+    scenario = db.query(Scenario).filter(Scenario.scenario_id == id).first()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    scenario.title = scenario_in.title
+    scenario.difficulty_level = scenario_in.difficulty_level
+    scenario.topic_id = scenario_in.topic_id
+    
+    db.commit()
+    db.refresh(scenario)
+    return scenario
+
 @router.delete("/scenarios/{id}")
 @router.delete("/scenarios/{id}")
 def delete_scenario(
