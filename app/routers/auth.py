@@ -18,11 +18,10 @@ def register(user_in: UserCreate, db: Session = Depends(database.get_db)):
         )
     user = User(
         email=user_in.email,
-        hashed_password=security.get_password_hash(user_in.password),
+        password_hash=security.get_password_hash(user_in.password), # Fixed: hashed_password -> password_hash
         full_name=user_in.full_name,
         is_active=user_in.is_active,
-        # is_admin is removed from model, mapping to role instead if needed, or default to LEARNER
-        # For simplicity in this phase, we just create a LEARNER by default or handle admin logic separately
+        role=user_in.role # Include role from request
     )
     db.add(user)
     db.commit()
