@@ -31,7 +31,7 @@ def register(user_in: UserCreate, db: Session = Depends(database.get_db)):
 @router.post("/auth/login", response_model=Token)
 def login(login_data: Login, db: Session = Depends(database.get_db)):
     user = db.query(User).filter(User.email == login_data.email).first()
-    if not user or not security.verify_password(login_data.password, user.hashed_password):
+    if not user or not security.verify_password(login_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email hoặc mật khẩu không chính xác",
