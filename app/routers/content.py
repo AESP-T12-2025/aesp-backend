@@ -105,6 +105,31 @@ def create_topic(
     db.refresh(new_topic)
     return new_topic
 
+    db.refresh(new_topic)
+    return new_topic
+
+@router.put("/topics/{id}", response_model=TopicResponse)
+def update_topic(
+    id: int,
+    topic_in: TopicCreate,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    # check_admin(current_user)
+    topic = db.query(Topic).filter(Topic.topic_id == id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    
+    topic.name = topic_in.name
+    topic.description = topic_in.description
+    # Note: image_url needs handling if TopicCreate has it (it should)
+    if hasattr(topic_in, 'image_url') and topic_in.image_url:
+        topic.image_url = topic_in.image_url
+    
+    db.commit()
+    db.refresh(topic)
+    return topic
+
 @router.delete("/topics/{id}")
 def delete_topic(
     id: int,
