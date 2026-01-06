@@ -134,11 +134,16 @@ def create_scenario(
     return new_scenario
 
 @router.delete("/scenarios/{id}")
+@router.delete("/scenarios/{id}")
 def delete_scenario(
     id: int,
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
+    scenario = db.query(Scenario).filter(Scenario.scenario_id == id).first()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+        
     db.delete(scenario)
     db.commit()
     return {"message": "Scenario deleted successfully"}
