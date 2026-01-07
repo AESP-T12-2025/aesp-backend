@@ -179,7 +179,7 @@ def update_scenario(
     return scenario
 
 @router.delete("/scenarios/{id}")
-@router.delete("/scenarios/{id}")
+
 def delete_scenario(
     id: int,
     db: Session = Depends(database.get_db),

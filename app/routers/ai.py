@@ -2,6 +2,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.services.ai_service import ai_service
 from app.services.tts_service import tts_service
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from app.core import database
+from app.models.content import AIFeedback
 
 router = APIRouter(
     prefix="/ai",
@@ -9,12 +13,15 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
+from typing import Optional
+
 class ChatRequest(BaseModel):
     message: str
     context: str = "You are a helpful English tutor."
 
 class AnalyzeRequest(BaseModel):
     text: str
+    session_id: Optional[int] = None
 
 class TTSRequest(BaseModel):
     text: str
@@ -29,11 +36,30 @@ async def chat(request: ChatRequest):
     return {"reply": response}
 
 @router.post("/analyze")
-async def analyze_speech(request: AnalyzeRequest):
+async def analyze_speech(
+    request: AnalyzeRequest,
+    db: Session = Depends(database.get_db)
+):
     """
     Analyze user speech text for grammar and pronunciation.
     """
     analysis = await ai_service.analyze_speech(request.text)
+    
+    # Save to DB if session_id provided
+    if request.session_id:
+        feedback = AIFeedback(
+            session_id=request.session_id,
+            user_input_text=request.text,
+            grammar_score=analysis.get("grammar_score", 0),
+            pronunciation_score=analysis.get("pronunciation_score", 0),
+            fluency_score=analysis.get("fluency_score", 0),
+            better_version=analysis.get("better_version", ""),
+            feedback_details=analysis # Store full JSON
+        )
+        db.add(feedback)
+        db.commit()
+        db.refresh(feedback)
+
     return analysis
 
 @router.post("/tts")

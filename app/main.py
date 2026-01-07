@@ -5,9 +5,9 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles # Added import for StaticFiles
-from app.routers import upload, auth, content, users, payment, ai
+from app.routers import upload, auth, content, users, payment, ai, mentor
 from app.core.database import engine, Base
-from app.models import user, content as content_model # Import models to register them with Base
+from app.models import user, content as content_model, mentor as mentor_model # Import models to register them with Base
 import uvicorn
 import os
 
@@ -40,6 +40,7 @@ app.include_router(content.router, tags=["Content"])
 app.include_router(users.router, tags=["Users"])
 app.include_router(payment.router, tags=["Payment"])
 app.include_router(ai.router, tags=["AI Core"]) # Added AI router
+app.include_router(mentor.router, tags=["Mentor & Booking"]) # Added Mentor router
 
 @app.get("/")
 def read_root():
