@@ -4,9 +4,9 @@ from typing import List
 from datetime import datetime
 
 from app.core import database, deps
-from app.models.mentor import Mentor, AvailabilitySlot, Booking, BookingStatus, MentorAssessment
+from app.models.mentor import Mentor, AvailabilitySlot, Booking, BookingStatus
 from app.models.user import User
-from app.schemas.mentor import MentorSchema, MentorResponse, SlotCreate, BookingCreate, MentorCreate, AssessmentCreate, AssessmentResponse
+from app.schemas.mentor import MentorSchema, MentorResponse, SlotCreate, BookingCreate, MentorCreate
 
 router = APIRouter()
 
@@ -102,71 +102,3 @@ def create_slot(
     db.add(new_slot)
     db.commit()
     return {"message": "Slot created successfully"}
-
-@router.get("/mentors/{mentor_id}/slots")
-def get_slots_by_mentor(
-    mentor_id: int,
-    db: Session = Depends(database.get_db)
-):
-    slots = db.query(AvailabilitySlot).filter(
-        AvailabilitySlot.mentor_id == mentor_id,
-        AvailabilitySlot.status == BookingStatus.AVAILABLE
-    ).all()
-    return slots
-
-@router.get("/mentors/my-bookings")
-def get_my_bookings(
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    # Get mentor profile
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(status_code=404, detail="Mentor profile not found")
-    
-    # Get all bookings for this mentor's slots
-    bookings = db.query(Booking).join(AvailabilitySlot).filter(
-        AvailabilitySlot.mentor_id == mentor.mentor_id
-    ).all()
-    
-    return bookings
-
-@router.put("/mentors/{id}/verify")
-def verify_mentor(
-    id: int,
-    db: Session = Depends(database.get_db),
-    # current_user: User = Depends(deps.get_current_user) # Add Auth check if needed
-):
-    mentor = db.query(Mentor).filter(Mentor.mentor_id == id).first()
-    if not mentor:
-         raise HTTPException(status_code=404, detail="Mentor not found")
-    
-    mentor.verification_status = "VERIFIED"
-    db.commit()
-    db.refresh(mentor)
-    return {"message": "Mentor verified successfully", "status": mentor.verification_status}
-
-@router.post("/mentors/reviews", response_model=AssessmentResponse)
-def create_review(
-    assessment: AssessmentCreate,
-    db: Session = Depends(database.get_db),
-    # current_user: User = Depends(deps.get_current_user)
-):
-    # Verify booking exists
-    booking = db.query(Booking).filter(Booking.booking_id == assessment.booking_id).first()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
-        
-    # Check if already reviewed (optional but good)
-    if booking.assessment:
-         raise HTTPException(status_code=400, detail="Booking already reviewed")
-
-    new_assessment = MentorAssessment(
-        booking_id=assessment.booking_id,
-        score=assessment.score,
-        feedback=assessment.feedback
-    )
-    db.add(new_assessment)
-    db.commit()
-    db.refresh(new_assessment)
-    return new_assessment

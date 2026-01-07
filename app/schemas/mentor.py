@@ -27,15 +27,3 @@ class MentorResponse(MentorSchema):
     
     class Config:
         from_attributes = True
-
-class AssessmentCreate(BaseModel):
-    booking_id: int
-    score: int
-    feedback: Optional[str] = None
-
-class AssessmentResponse(AssessmentCreate):
-    assessment_id: int
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
