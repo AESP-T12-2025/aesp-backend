@@ -52,3 +52,21 @@ class SpeakingSession(Base):
     end_time = Column(DateTime(timezone=True), nullable=True)
     score = Column(Integer, nullable=True) # Điểm số đánh giá (0-100)
     audio_url = Column(String, nullable=True) # Link file ghi âm (nếu có)
+    status = Column(String, default="IN_PROGRESS") # Trạng thái session
+
+    feedbacks = relationship("AIFeedback", back_populates="session")
+
+class AIFeedback(Base):
+    __tablename__ = "ai_feedbacks"
+
+    feedback_id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("speaking_sessions.session_id"), nullable=True)
+    user_input_text = Column(Text, nullable=False)
+    grammar_score = Column(Integer, default=0)
+    pronunciation_score = Column(Integer, default=0)
+    fluency_score = Column(Integer, default=0)
+    better_version = Column(Text, nullable=True)
+    feedback_details = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    session = relationship("SpeakingSession", back_populates="feedbacks")
