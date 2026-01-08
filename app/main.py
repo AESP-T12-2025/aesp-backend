@@ -16,6 +16,8 @@ Base.metadata.create_all(bind=engine)
 
 # Khởi tạo ứng dụng
 app = FastAPI(title="AESP Backend API")
+from app.api.social import router as social_router
+app.include_router(social_router)
 
 # Mount static directory for audio files
 os.makedirs("app/static", exist_ok=True)
