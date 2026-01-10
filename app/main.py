@@ -6,6 +6,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles # Added import for StaticFiles
 from app.routers import upload, auth, content, users, payment, ai, mentor
+from app.api import payment as payment_mock
 from app.core.database import engine, Base
 from app.models import user, content as content_model, mentor as mentor_model # Import models to register them with Base
 import uvicorn
@@ -17,7 +18,10 @@ Base.metadata.create_all(bind=engine)
 # Khởi tạo ứng dụng
 app = FastAPI(title="AESP Backend API")
 from app.api.social import router as social_router
+from app.api.payment import router as payment_router
+app.include_router(payment_mock.router)
 app.include_router(social_router)
+app.include_router(payment_router)
 
 # Mount static directory for audio files
 os.makedirs("app/static", exist_ok=True)
