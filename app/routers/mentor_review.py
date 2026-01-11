@@ -96,3 +96,142 @@ def get_my_reviews(
             "next_steps": r.actionable_next_steps
         })
     return results
+
+# ============== SESSION MANAGEMENT ==============
+from app.models.content import SpeakingSession
+from datetime import datetime
+
+# Using a secondary router for /mentor-review prefix
+session_router = APIRouter(prefix="/mentor-review", tags=["Mentor Sessions & Resources"])
+
+@session_router.get("/sessions")
+def get_mentor_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all sessions for current mentor (via bookings)"""
+    from app.models.mentor import Mentor, AvailabilitySlot
+    
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        return []
+    
+    # Get bookings then construct session-like data
+    bookings = (
+        db.query(Booking)
+        .join(AvailabilitySlot)
+        .filter(AvailabilitySlot.mentor_id == mentor.mentor_id)
+        .all()
+    )
+    
+    result = []
+    for b in bookings:
+        result.append({
+            "session_id": b.booking_id,  # Use booking_id as session reference
+            "booking_id": b.booking_id,
+            "learner_id": b.learner_id,
+            "start_time": b.slot.start_time.isoformat() if b.slot else None,
+            "end_time": b.slot.end_time.isoformat() if b.slot else None,
+            "status": b.slot.status.value if b.slot else "UNKNOWN",
+            "notes": getattr(b, 'feedback_notes', None)
+        })
+    return result
+
+@session_router.post("/sessions/start")
+def start_session(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    booking = db.query(Booking).filter(Booking.booking_id == booking_id).first()
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    
+    booking.slot.status = BookingStatus.BOOKED  # Mark as in progress
+    db.commit()
+    return {"message": "Session started", "booking_id": booking_id}
+
+@session_router.post("/sessions/{session_id}/end")
+def end_session(
+    session_id: int,
+    notes: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    booking = db.query(Booking).filter(Booking.booking_id == session_id).first()
+    if not booking:
+        raise HTTPException(404, "Session not found")
+    
+    booking.slot.status = BookingStatus.COMPLETED
+    if notes:
+        booking.feedback_notes = notes
+    db.commit()
+    return {"message": "Session ended"}
+
+@session_router.put("/sessions/{session_id}/notes")
+def update_notes(
+    session_id: int,
+    notes: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    booking = db.query(Booking).filter(Booking.booking_id == session_id).first()
+    if not booking:
+        raise HTTPException(404, "Session not found")
+    
+    booking.feedback_notes = notes
+    db.commit()
+    return {"message": "Notes updated"}
+
+# ============== RESOURCES ==============
+from app.models.mentor_review import MentorResource
+
+class ResourceCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    file_url: str
+    resource_type: str = "DOCUMENT"
+
+@session_router.get("/resources")
+def get_resources(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    resources = db.query(MentorResource).filter(MentorResource.mentor_id == current_user.user_id).all()
+    return resources
+
+@session_router.post("/resources")
+def create_resource(
+    data: ResourceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    resource = MentorResource(
+        mentor_id=current_user.user_id,
+        title=data.title,
+        description=data.description,
+        file_url=data.file_url,
+        resource_type=data.resource_type
+    )
+    db.add(resource)
+    db.commit()
+    db.refresh(resource)
+    return resource
+
+@session_router.delete("/resources/{resource_id}")
+def delete_resource(
+    resource_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    resource = db.query(MentorResource).filter(
+        MentorResource.resource_id == resource_id,
+        MentorResource.mentor_id == current_user.user_id
+    ).first()
+    if not resource:
+        raise HTTPException(404, "Resource not found")
+    
+    db.delete(resource)
+    db.commit()
+    return {"message": "Resource deleted"}
+

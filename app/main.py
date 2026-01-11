@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles # Added import for StaticFiles
 from app.routers import (
     upload, auth, content, users, payment, ai, mentor, 
     social, gamification, mentor_review, proficiency, vocab,
-    support, notification, peer, admin
+    support, notification, peer, admin, analytics, policies
 )
 from app.core.database import engine, Base
 from app.models import (
@@ -62,12 +62,20 @@ app.include_router(mentor.router, tags=["Mentor & Booking"])
 app.include_router(social.router)
 app.include_router(gamification.router)
 app.include_router(mentor_review.router)
+app.include_router(mentor_review.session_router)  # NEW: /mentor-review/sessions, /mentor-review/resources
 app.include_router(proficiency.router)
 app.include_router(vocab.router)
 app.include_router(support.router)
 app.include_router(notification.router)
 app.include_router(peer.router)
 app.include_router(admin.router)
+app.include_router(analytics.router)
+app.include_router(policies.router)
+
+# Images (Pexels API)
+from app.routers import images
+app.include_router(images.router)
+
 
 @app.get("/")
 def read_root():

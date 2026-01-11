@@ -41,10 +41,17 @@ def create_mentor_post(
     if current_user.role != "MENTOR" and current_user.role != "ADMIN":
         raise HTTPException(status_code=403, detail="Only Mentors can post")
 
+    from app.models.social import ModerationStatus # Ensure import
+    
+    # Auto-approve for now or PENDING if we want strict moderation
+    # Let's set to APPROVED for Mentors to reduce friction, but ADMIN can change later
+    initial_status = ModerationStatus.APPROVED 
+    
     new_post = MentorPost(
         mentor_id=current_user.user_id,
         content=post_data.content,
-        image_url=post_data.image_url
+        image_url=post_data.image_url,
+        moderation_status=initial_status
     )
     db.add(new_post)
     db.commit()
@@ -62,7 +69,12 @@ def create_mentor_post(
 
 @router.get("/posts", response_model=List[PostResponse])
 def get_community_feed(db: Session = Depends(get_db)):
-    posts = db.query(MentorPost).order_by(MentorPost.created_at.desc()).all()
+    from app.models.social import ModerationStatus
+    # Only show APPROVED posts
+    posts = db.query(MentorPost).filter(
+        MentorPost.moderation_status == ModerationStatus.APPROVED
+    ).order_by(MentorPost.created_at.desc()).all()
+    
     results = []
     for p in posts:
         mentor_name = p.mentor.full_name if p.mentor else "Unknown"
@@ -76,6 +88,49 @@ def get_community_feed(db: Session = Depends(get_db)):
             "comment_count": len(p.comments)
         })
     return results
+
+# --- Admin Moderation Endpoints ---
+@router.put("/admin/posts/{post_id}/moderate")
+def moderate_post(
+    post_id: int, 
+    status: str, # APPROVED, REJECTED
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "ADMIN":
+        raise HTTPException(403, "Admin only")
+        
+    post = db.query(MentorPost).filter(MentorPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+        
+    post.moderation_status = status
+    db.commit()
+    return {"message": f"Post {status}"}
+
+@router.get("/admin/posts")
+def get_admin_posts(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "ADMIN":
+        raise HTTPException(403, "Admin only")
+        
+    query = db.query(MentorPost).order_by(MentorPost.created_at.desc())
+    if status:
+        query = query.filter(MentorPost.moderation_status == status)
+        
+    posts = query.all()
+    # Return simpler structure or reuse PostResponse
+    return [{
+        "id": p.id,
+        "content": p.content,
+        "mentor_name": p.mentor.full_name if p.mentor else "Unknown",
+        "status": p.moderation_status,
+        "created_at": p.created_at
+    } for p in posts]
+
 
 @router.post("/posts/{post_id}/comments")
 def add_comment(

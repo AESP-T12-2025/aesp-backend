@@ -18,6 +18,7 @@ class ServicePackage(Base):
     price = Column(Float, nullable=False)
     duration_days = Column(Integer, nullable=False) # e.g., 30 for 1 month
     features = Column(JSON, nullable=True) # e.g., {"with_mentor": true, "ai_limit": 100}
+    mentor_included = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
 
 class Transaction(Base):

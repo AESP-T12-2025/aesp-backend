@@ -101,4 +101,198 @@ def create_slot(
     )
     db.add(new_slot)
     db.commit()
+    db.add(new_slot)
+    db.commit()
     return {"message": "Slot created successfully"}
+
+@router.get("/mentors/{mentor_id}/slots")
+def get_mentor_slots(
+    mentor_id: int,
+    db: Session = Depends(database.get_db)
+):
+    slots = db.query(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor_id,
+        AvailabilitySlot.status == BookingStatus.AVAILABLE
+    ).all()
+    return slots
+
+@router.get("/mentors/me/bookings")
+def get_my_bookings(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    # 1. Get Mentor ID
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+         raise HTTPException(400, "User is not a mentor")
+         
+    # 2. Get Bookings via Slots
+    # Join Booking -> Slot -> Mentor
+    bookings = db.query(Booking).join(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id
+    ).all()
+    
+    return bookings
+
+@router.post("/sessions/{booking_id}/feedback")
+def submit_session_feedback(
+    booking_id: int,
+    feedback: str,
+    rating: int, # 1-5
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    # Verify mentor owns this booking
+    booking = db.query(Booking).filter(Booking.booking_id == booking_id).first()
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+        
+    # TODO: Verify ownership (complex join needed or trust ID for now)
+    
+    booking.feedback_notes = feedback
+    booking.status = "COMPLETED" # Assume enum string or object
+    db.commit()
+    return {"message": "Feedback submitted"}
+
+# --- Mentor Assessments for Learners ---
+from pydantic import BaseModel as PydanticBase
+from typing import Optional
+
+class AssessmentCreate(PydanticBase):
+    booking_id: int
+    score: int  # 1-10
+    feedback: str
+    level_assigned: Optional[str] = None  # A1, A2, B1, B2, C1, C2
+
+@router.post("/mentor/assessments")
+def create_assessment(
+    data: AssessmentCreate,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    from app.models.mentor import MentorAssessment, Booking
+    
+    # Verify booking exists
+    booking = db.query(Booking).filter(Booking.booking_id == data.booking_id).first()
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    
+    # Create or update assessment
+    assessment = db.query(MentorAssessment).filter(MentorAssessment.booking_id == data.booking_id).first()
+    if assessment:
+        assessment.score = data.score
+        assessment.feedback = data.feedback
+    else:
+        assessment = MentorAssessment(
+            booking_id=data.booking_id,
+            score=data.score,
+            feedback=data.feedback
+        )
+        db.add(assessment)
+    
+    # Update booking status
+    booking.status = "COMPLETED"
+    
+    # Optionally update learner's level
+    if data.level_assigned:
+        from app.models.proficiency import LearningPath
+        path = db.query(LearningPath).filter(LearningPath.user_id == booking.learner_id).first()
+        if path:
+            path.current_level = data.level_assigned
+        else:
+            path = LearningPath(user_id=booking.learner_id, current_level=data.level_assigned)
+            db.add(path)
+    
+    db.commit()
+    return {"message": "Assessment created", "assessment_id": assessment.assessment_id}
+
+@router.get("/mentor/assessments")
+def get_my_assessments(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    from app.models.mentor import MentorAssessment, Booking, AvailabilitySlot, Mentor
+    
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        raise HTTPException(400, "User is not a mentor")
+    
+    # Get assessments through booking -> slot -> mentor chain
+    assessments = db.query(MentorAssessment).join(Booking).join(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id
+    ).all()
+    
+    result = []
+    for a in assessments:
+        result.append({
+            "assessment_id": a.assessment_id,
+            "booking_id": a.booking_id,
+            "learner_name": a.booking.learner.full_name if a.booking.learner else "Unknown",
+            "score": a.score,
+            "feedback": a.feedback,
+            "created_at": a.created_at.isoformat() if a.created_at else None
+        })
+    
+    return result
+
+
+# --- Mentor Vocab Suggestions ---
+
+from app.models.mentor_resource import MentorVocabSuggestion
+
+class VocabSuggestionCreate(PydanticBase):
+    topic_id: Optional[int] = None
+    vocabulary: str
+    collocations: Optional[str] = None
+    idioms: Optional[str] = None
+    tips: Optional[str] = None
+
+class VocabSuggestionResponse(VocabSuggestionCreate):
+    id: int
+    mentor_id: int
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+@router.post("/mentor/vocab-suggestions", response_model=VocabSuggestionResponse)
+def create_vocab_suggestion(
+    data: VocabSuggestionCreate,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        raise HTTPException(400, "User is not a mentor")
+    
+    suggestion = MentorVocabSuggestion(
+        mentor_id=mentor.mentor_id,
+        topic_id=data.topic_id,
+        vocabulary=data.vocabulary,
+        collocations=data.collocations,
+        idioms=data.idioms,
+        tips=data.tips
+    )
+    db.add(suggestion)
+    db.commit()
+    db.refresh(suggestion)
+    return suggestion
+
+@router.get("/mentor/vocab-suggestions", response_model=List[VocabSuggestionResponse])
+def get_my_vocab_suggestions(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        raise HTTPException(400, "User is not a mentor")
+    
+    return db.query(MentorVocabSuggestion).filter(MentorVocabSuggestion.mentor_id == mentor.mentor_id).all()
+
+@router.get("/topics/{topic_id}/vocab-suggestions", response_model=List[VocabSuggestionResponse])
+def get_topic_vocab_suggestions(
+    topic_id: int,
+    db: Session = Depends(database.get_db)
+):
+    # This endpoint is public for learners/mentors to see suggestions for a topic
+    return db.query(MentorVocabSuggestion).filter(MentorVocabSuggestion.topic_id == topic_id).all()

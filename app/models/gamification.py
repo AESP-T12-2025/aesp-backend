@@ -29,6 +29,7 @@ class UserChallenge(Base):
     challenge_id = Column(Integer, ForeignKey("challenges.id"), nullable=False)
     current_progress = Column(Integer, default=0)
     is_completed = Column(Boolean, default=False)
+    is_claimed = Column(Boolean, default=False) # NEW: Track if reward is claimed
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", backref="challenges")

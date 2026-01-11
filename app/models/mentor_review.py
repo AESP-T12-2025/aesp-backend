@@ -27,3 +27,17 @@ class MentorReview(Base):
     booking = relationship("Booking", backref="detailed_review")
     mentor = relationship("User", foreign_keys=[mentor_id])
     learner = relationship("User", foreign_keys=[learner_id])
+
+class MentorResource(Base):
+    __tablename__ = "mentor_resources"
+
+    resource_id = Column(Integer, primary_key=True, index=True)
+    mentor_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    file_url = Column(String(500), nullable=False)
+    resource_type = Column(String(50), default="DOCUMENT")  # DOCUMENT, VIDEO, AUDIO, LINK
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    mentor = relationship("User", backref="resources")
+

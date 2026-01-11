@@ -22,6 +22,7 @@ class ChatRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     text: str
     session_id: Optional[int] = None
+    duration_seconds: float = 0.0
 
 class TTSRequest(BaseModel):
     text: str
@@ -38,27 +39,76 @@ async def chat(request: ChatRequest):
 @router.post("/analyze")
 async def analyze_speech(
     request: AnalyzeRequest,
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    # Optional implicit user from session if available, or force dependency if needed. 
+    # For now, rely on session_id to find user OR simpler: current_user (but practice page needs auth)
+    # Let's add current_user to be safe for gamification updates
+    # Note: frontend must send token. practiceService does use api which sets token.
 ):
+    from app.models.gamification import UserDailyStats
+    from datetime import datetime
+    
     """
     Analyze user speech text for grammar and pronunciation.
     """
     analysis = await ai_service.analyze_speech(request.text)
     
-    # Save to DB if session_id provided
+    # Save to DB if session_id provided and Update Stats
     if request.session_id:
-        feedback = AIFeedback(
-            session_id=request.session_id,
-            user_input_text=request.text,
-            grammar_score=analysis.get("grammar_score", 0),
-            pronunciation_score=analysis.get("pronunciation_score", 0),
-            fluency_score=analysis.get("fluency_score", 0),
-            better_version=analysis.get("better_version", ""),
-            feedback_details=analysis # Store full JSON
-        )
-        db.add(feedback)
-        db.commit()
-        db.refresh(feedback)
+        try:
+            # 1. Save Feedback
+            feedback = AIFeedback(
+                session_id=request.session_id,
+                user_input_text=request.text,
+                grammar_score=analysis.get("grammar_score", 0),
+                pronunciation_score=analysis.get("pronunciation_score", 0),
+                fluency_score=analysis.get("fluency_score", 0),
+                better_version=analysis.get("better_version", ""),
+                feedback_details=analysis # Store full JSON
+            )
+            db.add(feedback)
+            
+            # 2. Update Daily Stats (Gamification)
+            # Find user_id from session (or inject current_user)
+            # Query session to get user_id
+            from app.models.content import SpeakingSession
+            session_rec = db.query(SpeakingSession).filter(SpeakingSession.session_id == request.session_id).first()
+            
+            if session_rec:
+                user_id = session_rec.user_id
+                today = datetime.now().date()
+                
+                daily_stat = db.query(UserDailyStats).filter(
+                    UserDailyStats.user_id == user_id, 
+                    UserDailyStats.date == today
+                ).first()
+                
+                if not daily_stat:
+                    daily_stat = UserDailyStats(user_id=user_id, date=today)
+                    db.add(daily_stat)
+                
+                # Update metrics
+                word_count = len(request.text.split())
+                daily_stat.words_learned += word_count
+                daily_stat.speaking_duration_seconds += int(request.duration_seconds)
+                # Note: login_streak is handled in login
+                
+                # --- UPDATE CHALLENGES ---
+                from app.routers.gamification import update_user_challenge_progress
+                # 1. Update Vocab Count
+                update_user_challenge_progress(db, user_id, "VOCAB_COUNT", word_count)
+                # 2. Update Speaking Time
+                update_user_challenge_progress(db, user_id, "SPEAKING_TIME", int(request.duration_seconds))
+                
+            db.commit()
+            db.refresh(feedback)
+        except Exception as e:
+            print(f"ERROR Saving AI Feedback & Stats: {e}")
+            import traceback
+            traceback.print_exc()
+            # Do not raise 500 here, just log it and return analysis so user still sees result
+            # Or raise if critical. Let's return analysis but log error.
+
 
     return analysis
 
