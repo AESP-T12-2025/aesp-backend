@@ -9,6 +9,14 @@ class DifficultyLevel(str, enum.Enum):
     INTERMEDIATE = "INTERMEDIATE"
     ADVANCED = "ADVANCED"
 
+class Industry(str, enum.Enum):
+    GENERAL = "GENERAL"
+    BUSINESS = "BUSINESS"
+    HEALTHCARE = "HEALTHCARE"
+    TOURISM = "TOURISM"
+    TECHNOLOGY = "TECHNOLOGY"
+    HOSPITALITY = "HOSPITALITY"
+
 class Category(Base):
     __tablename__ = "categories"
 
@@ -26,7 +34,8 @@ class Topic(Base):
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     image_url = Column(String, nullable=True)
-
+    industry = Column(SqlEnum(Industry), default=Industry.GENERAL) # NEW
+    
     category = relationship("Category", back_populates="topics")
     scenarios = relationship("Scenario", back_populates="topic")
 

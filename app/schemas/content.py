@@ -21,6 +21,7 @@ class TopicBase(BaseModel):
     name: str
     description: Optional[str] = None
     image_url: Optional[str] = None
+    industry: Optional[str] = "GENERAL" # NEW
     category_id: int
 
 class TopicCreate(TopicBase):

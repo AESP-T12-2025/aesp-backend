@@ -23,6 +23,8 @@ class User(Base):
     role = Column(SqlEnum(UserRole), default=UserRole.LEARNER)
     auth_provider = Column(SqlEnum(AuthProvider), default=AuthProvider.LOCAL)
     is_active = Column(Boolean, default=True)
+    daily_learning_goal = Column(Integer, default=15) # Minutes/day
+    bonus_xp = Column(Integer, default=0) # XP earned from challenges/events
     created_at = Column(DateTime, default=func.now())
 
     # Backwards compatibility properties if needed, or update codebase to use user_id

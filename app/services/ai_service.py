@@ -42,18 +42,32 @@ class GeminiService:
         """
         try:
             prompt = f"""
-            Analyze the following English sentence for grammar and naturalness:
-            "{text}"
+            Act as an encouraging English Speaking Examiner.
+            Analyze the following spoken sentence (converted to text) for grammar, naturalness, and clarity:
+            
+            USER SAID: "{text}"
+
+            Scoring Guidelines:
+            - Give HIGH SCORES (80-100) if the sentence is grammatically correct and understandable.
+            - "Pronunciation_score": 0-100 (Give >80 for clear speech).
+            - "Fluency_score": 0-100 (Give >80 for natural flow).
+            - Do NOT return single digit scores like 8 or 9, return 80 or 90.
 
             Return ONLY a JSON object with this exact structure:
-            {{
-                "grammar_score": (0-10),
-                "pronunciation_score": (0-10, estimate based on text complexity/errors),
-                "fluency_score": (0-10, estimate),
-                "corrections": ["list of specific grammar corrections"],
-                "better_version": "A more natural way to say this",
-                "detailed_feedback": "Brief explanation of errors"
-            }}
+            {
+                "grammar_score": (0-100),
+                "pronunciation_score": (0-100),
+                "fluency_score": (0-100),
+                "corrections": ["list of major errors only"],
+                "better_version": "A more natural native-like way to say this",
+                "detailed_feedback": "A short, encouraging comment",
+                "phonetic_analysis": {
+                    "transcription": "IPA transcription of user speech",
+                    "mispronounced_words": [
+                        { "word": "example", "correct_ipa": "/ɪɡˈzɑːmpəl/", "issue": "stressed wrong syllable" }
+                    ]
+                }
+            }
             """
             response = self.model.generate_content(prompt)
             # Cleanup Markdown code blocks if present

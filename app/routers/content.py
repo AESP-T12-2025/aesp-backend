@@ -21,6 +21,7 @@ def get_categories(
 @router.get("/topics", response_model=List[TopicResponse])
 def get_topics(
     category_id: Optional[int] = None,
+    industry: Optional[str] = None, # NEW
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(database.get_db),
@@ -29,6 +30,9 @@ def get_topics(
     query = db.query(Topic)
     if category_id:
         query = query.filter(Topic.category_id == category_id)
+    if industry and industry != "ALL":
+        query = query.filter(Topic.industry == industry)
+        
     topics = query.offset(skip).limit(limit).all()
     return topics
 
@@ -210,22 +214,28 @@ def create_speaking_session(
     from app.models.content import SpeakingSession
     
     # Verify scenario exists
-    scenario = db.query(Scenario).filter(Scenario.scenario_id == session_in.scenario_id).first()
-    if not scenario:
-        raise HTTPException(status_code=404, detail="Scenario not found")
+    try:
+        scenario = db.query(Scenario).filter(Scenario.scenario_id == session_in.scenario_id).first()
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
 
-    new_session = SpeakingSession(
-        user_id=current_user.user_id,
-        scenario_id=session_in.scenario_id,
-        start_time=session_in.start_time or datetime.now(),
-        status="IN_PROGRESS" # Optional field if needed later, for now just create
-    )
-    db.add(new_session)
-    db.commit()
-    db.refresh(new_session)
-    
-    return {
-        "session_id": new_session.session_id,
-        "message": "Session started successfully",
-        "scenario_title": scenario.title
-    }
+        new_session = SpeakingSession(
+            user_id=current_user.user_id,
+            scenario_id=session_in.scenario_id,
+            start_time=session_in.start_time or datetime.now(),
+            status="IN_PROGRESS"
+        )
+        db.add(new_session)
+        db.commit()
+        db.refresh(new_session)
+        
+        return {
+            "session_id": new_session.session_id,
+            "message": "Session started successfully",
+            "scenario_title": scenario.title
+        }
+    except Exception as e:
+        print(f"ERROR Creating Session: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
