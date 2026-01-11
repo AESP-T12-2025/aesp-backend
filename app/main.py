@@ -5,7 +5,11 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles # Added import for StaticFiles
-from app.routers import upload, auth, content, users, payment, ai, mentor, social, gamification, mentor_review, proficiency, vocab
+from app.routers import (
+    upload, auth, content, users, payment, ai, mentor, 
+    social, gamification, mentor_review, proficiency, vocab,
+    support, notification, peer, admin
+)
 from app.core.database import engine, Base
 from app.models import (
     user, 
@@ -60,6 +64,10 @@ app.include_router(gamification.router)
 app.include_router(mentor_review.router)
 app.include_router(proficiency.router)
 app.include_router(vocab.router)
+app.include_router(support.router)
+app.include_router(notification.router)
+app.include_router(peer.router)
+app.include_router(admin.router)
 
 @app.get("/")
 def read_root():
