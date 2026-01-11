@@ -13,3 +13,4 @@ pydantic-settings
 email-validator
 google-generativeai
 edge-tts
+httpx
