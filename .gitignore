@@ -1,10 +1,44 @@
-# Bỏ qua môi trường ảo
+# Environment variables (QUAN TRỌNG - KHÔNG ĐƯỢC COMMIT!)
+.env
+.env.local
+.env.production
+
+# Virtual environment
 venv/
 .venv/
+env/
 
-# Bỏ qua file chứa mật khẩu (QUAN TRỌNG)
-.env
-
-# Bỏ qua file rác Python
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+
+# Seed scripts (dev only)
+seed_*.py
+seed_*.sql
+
+# Utility scripts
+get_schema.py
+routes.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+Plaintext
+*.tmp
+*.temp
+
+# Audio files generated
+app/static/audio/*.mp3
