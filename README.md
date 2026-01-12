@@ -1,115 +1,197 @@
-# 🚀 AESP Backend - AI-Supported English Speaking Platform
+<p align="center">
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
+  <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
+  <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/Google%20Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Gemini AI"/>
+</p>
 
-**Version:** 1.0 (Week 1 Official Release)  
-**Status:** ✅ 100% Complete  
-**Developed by:** Bùi Quang Long (Leader)
+<h1 align="center">🎓 AESP Backend</h1>
+<h3 align="center">AI-Supported English Speaking Practice Platform</h3>
 
----
-
-## 🌟 Giới thiệu
-
-Đây là Backend chính thức cho dự án AESP, được xây dựng bằng **FastAPI** và **PostgreSQL**. Hệ thống cung cấp đầy đủ các API cần thiết cho Frontend (Next.js) hoạt động, bao gồm xác thực, quản lý nội dung, upload media và giả lập thanh toán.
-
-### 🔥 Tính năng nổi bật (Đã hoàn thiện)
-*   **Authentication**: Đăng ký/Đăng nhập bảo mật chuẩn JWT (Access Token).
-*   **User Profile**: Quản lý thông tin cá nhân, cập nhật Avatar.
-*   **Content Management**:
-    *   Hiển thị Danh mục (Categories), Chủ đề (Topics), Bài học (Scenarios).
-    *   **Admin Tools**: API Thêm/Sửa/Xóa bài học (Full CRUD).
-*   **Media Service**: Tích hợp **Cloudinary** để upload ảnh cực nhanh.
-*   **Features for Frontend**:
-    *   **CORS Config**: Đã mở kết nối cho localhost:3000.
-    *   **Mock Payment**: API giả lập lịch sử giao dịch.
-    *   **Vocabulary**: API lấy từ vựng theo bài học.
-    *   **Practice Session**: API lưu kết quả luyện tập Speaking.
+<p align="center">
+  <strong>Nền tảng luyện nói tiếng Anh thông minh với sự hỗ trợ của AI</strong>
+</p>
 
 ---
 
-## 🛠️ Hướng dẫn Cài đặt (Dành cho Dev)
+## 📖 Giới thiệu
 
-### 1. Clone dự án
+**AESP Backend** là hệ thống API server được xây dựng bằng **FastAPI**, cung cấp các dịch vụ RESTful cho nền tảng luyện nói tiếng Anh. Hệ thống tích hợp **AI Gemini** để phân tích và hỗ trợ người học cải thiện kỹ năng Speaking.
+
+### ✨ Tính năng chính
+
+| Tính năng | Mô tả |
+|-----------|-------|
+| 🔐 **Authentication** | Đăng ký, đăng nhập với JWT Token bảo mật |
+| 👤 **User Management** | Quản lý profile, avatar, phân quyền (Learner/Mentor/Admin) |
+| 📚 **Content Management** | CRUD cho Categories, Topics, Scenarios, Vocabulary |
+| 🤖 **AI Integration** | Chat AI, phân tích phát âm với Google Gemini |
+| 🔊 **Text-to-Speech** | Chuyển văn bản thành giọng nói với Edge TTS |
+| ☁️ **Media Upload** | Upload ảnh/audio lên Cloudinary |
+| 💳 **Payment** | Quản lý giao dịch thanh toán |
+| 🌐 **Social Features** | Bài viết, bình luận, tương tác cộng đồng |
+
+---
+
+## 🗂️ Cấu trúc dự án
+
+```
+aesp-backend/
+├── app/
+│   ├── core/           # Cấu hình database, security, settings
+│   ├── models/         # SQLAlchemy ORM models
+│   ├── routers/        # API endpoints (auth, users, content, ai, etc.)
+│   ├── schemas/        # Pydantic schemas cho validation
+│   ├── services/       # Business logic (AI service, TTS service)
+│   └── main.py         # Application entry point
+├── requirements.txt    # Python dependencies
+└── .env               # Environment variables
+```
+
+---
+
+## 🚀 Cài đặt & Chạy
+
+### Yêu cầu hệ thống
+
+- **Python** 3.10+
+- **PostgreSQL** (hoặc sử dụng Neon DB cloud)
+
+### Bước 1: Clone repository
+
 ```bash
 git clone https://github.com/AESP-T12-2025/aesp-backend.git
 cd aesp-backend
 ```
 
-### 2. Thiết lập môi trường (Virtual Environment)
-*   **Windows:**
-    ```powershell
-    python -m venv venv
-    .\venv\Scripts\activate
-    ```
-*   **Mac/Linux:**
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
+### Bước 2: Tạo môi trường ảo
 
-### 3. Cài đặt thư viện
+```bash
+# Windows
+python -m venv venv
+.\venv\Scripts\activate
+
+# macOS/Linux
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### Bước 3: Cài đặt dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Cấu hình file `.env` (Quan trọng!)
-Tạo file `.env` ở thư mục gốc và dán nội dung sau (Key đã được cấu hình sẵn cho Dev):
+### Bước 4: Cấu hình biến môi trường
+
+Tạo file `.env` tại thư mục gốc:
 
 ```env
-# Database (Neon Postgres - Live)
-DATABASE_URL=postgresql://neondb_owner:npg_AmkzWlJcTf12@ep-noisy-smoke-a15epwsb-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+# Database
+DATABASE_URL=postgresql://user:password@host/database?sslmode=require
 
-# Security
-SECRET_KEY=changethisSecretKeyOnlyForDev
+# JWT Security
+SECRET_KEY=your-super-secret-key-change-in-production
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
-# Cloudinary (Media Upload - Upload được luôn)
-CLOUDINARY_CLOUD_NAME=dujyahhwk
-CLOUDINARY_API_KEY=969531162213173
-CLOUDINARY_API_SECRET=03SY3A46cdIfcR2wH1RWMQz0HlI
+# Cloudinary (Media Upload)
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+CLOUDINARY_API_KEY=your-api-key
+CLOUDINARY_API_SECRET=your-api-secret
+
+# Google Gemini AI (Optional)
+GEMINI_API_KEY=your-gemini-api-key
 ```
 
----
+### Bước 5: Khởi động server
 
-## ▶️ Chạy Server
-
-Chạy lệnh sau để khởi động Backend:
-
-```powershell
+```bash
 uvicorn app.main:app --reload
 ```
 
-*   Server sẽ chạy tại: `http://127.0.0.1:8000`
-*   **API Docs (Swagger UI):** 👉 [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-    *(Vào đây để test toàn bộ API trực quan, không cần Postman)*
+🌐 Server chạy tại: `http://localhost:8000`
+
+📚 API Documentation: `http://localhost:8000/docs`
 
 ---
 
-## 📚 Hướng dẫn sử dụng API (Quick Cheatsheet)
+## 📡 API Endpoints
 
-### 1. Đăng ký & Đăng nhập (Auth)
-*   Vào `POST /auth/register` để tạo tài khoản mới.
-*   Vào `POST /auth/login` để đăng nhập -> Copy **Access Token** trả về.
-*   **Quan trọng**: Bấm nút **Authorize (ổ khóa)** trên Swagger -> Nhập `Bearer <token_vua_copy>` để mở khóa các API bảo mật.
+### 🔐 Authentication
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| POST | `/auth/register` | Đăng ký tài khoản mới |
+| POST | `/auth/login` | Đăng nhập, nhận JWT token |
+| GET | `/auth/me` | Thông tin user hiện tại |
 
-### 2. Upload Ảnh (Media)
-*   Dùng API `POST /upload/image`. Chọn file ảnh từ máy -> Trả về URL dùng luôn được.
+### 👥 Users
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| GET | `/users` | Danh sách users (Admin) |
+| GET | `/users/{id}` | Chi tiết user |
+| PUT | `/users/profile` | Cập nhật profile |
 
-### 3. Test tính năng Admin (Thêm bài học)
-*   *Lưu ý*: Hiện tại check quyền Admin đang được **TẮT** (commented out) để Frontend dễ dàng dev tính năng mà không cần chỉnh DB.
-*   Cứ gọi `POST /topics` hoặc `POST /scenarios` thoải mái.
-*   **Payload mẫu cho tạo Speaking Session**:
-    ```json
-    {
-      "scenario_id": 1,
-      "start_time": "2026-01-04T12:00:00"
-    }
-    ```
+### 📖 Content
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| GET | `/categories` | Danh sách categories |
+| GET | `/topics` | Danh sách topics |
+| GET | `/scenarios` | Danh sách scenarios |
+| GET | `/scenarios/{id}/vocab` | Từ vựng theo scenario |
 
-### 4. Từ vựng (Vocabulary)
-*   Gọi `GET /scenarios/{id}/vocab` để lấy list từ vựng gợi ý.
+### 🤖 AI Services
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| POST | `/ai/chat` | Chat với AI assistant |
+| POST | `/ai/analyze` | Phân tích bài nói |
+| POST | `/ai/tts` | Text-to-Speech |
+
+### 📤 Upload
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| POST | `/upload/image` | Upload hình ảnh |
+| POST | `/upload/audio` | Upload file audio |
 
 ---
 
-## 🤝 Liên hệ
-Leader: **Bùi Quang Long**
-*(Nếu server lỗi hoặc DB sập, vui lòng ping trực tiếp)*
+## 🔧 Tech Stack
+
+| Công nghệ | Mục đích |
+|-----------|----------|
+| **FastAPI** | Web framework |
+| **SQLAlchemy** | ORM |
+| **PostgreSQL** | Database |
+| **Pydantic** | Data validation |
+| **JWT** | Authentication |
+| **Cloudinary** | Media storage |
+| **Google Gemini** | AI/ML services |
+| **Edge TTS** | Text-to-Speech |
+
+---
+
+## 🚢 Deployment
+
+Backend được deploy trên **Render**:
+
+🔗 Production URL: `https://aesp-backend.onrender.com`
+
+---
+
+## 👥 Team
+
+| Thành viên | Vai trò |
+|------------|---------|
+| **Bùi Quang Long** | Team Leader |
+
+---
+
+## 📄 License
+
+Dự án này được phát triển cho mục đích học tập tại **UTH - ĐẠI HỌC **.
+
+---
+
+<p align="center">
+  <sub>Made with ❤️ by AESP Team</sub>
+</p>
