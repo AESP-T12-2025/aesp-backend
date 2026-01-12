@@ -188,7 +188,7 @@ Backend được deploy trên **Render**:
 
 ## 📄 License
 
-Dự án này được phát triển cho mục đích học tập tại **UTH - ĐẠI HỌC **.
+Dự án này được phát triển cho mục đích học tập tại **UTH - Đại học Giao thông Vận tải TP.HCM**.
 
 ---
 
