@@ -1,8 +1,0 @@
-aesp-backend/
-├── app/
-│   ├── main.py
-│   ├── routes.py
-│   ├── models.py
-│   └── schemas.py
-├── requirements.txt
-└── .gitignore
