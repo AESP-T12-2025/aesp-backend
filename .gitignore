@@ -1,0 +1,44 @@
+# Environment variables (QUAN TRỌNG - KHÔNG ĐƯỢC COMMIT!)
+.env
+.env.local
+.env.production
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Seed scripts (dev only)
+seed_*.py
+seed_*.sql
+
+# Utility scripts
+get_schema.py
+routes.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+Plaintext
+*.tmp
+*.temp
+
+# Audio files generated
+app/static/audio/*.mp3
