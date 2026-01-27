@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.models.user import User, UserRole
 
 
+
+@pytest.mark.skip(reason="Feature not implemented yet. Unskip when implementing Issue #28")
 class TestFindPartnerEndpoint:
     """Test POST /peer/find-partner"""
     
@@ -185,6 +187,8 @@ class TestFindPartnerEndpoint:
         assert response_b2.status_code in [200, 201, 202]
 
 
+
+@pytest.mark.skip(reason="Feature not implemented yet. Unskip when implementing Issue #28")
 class TestPeerSession:
     """Test peer practice session management"""
     

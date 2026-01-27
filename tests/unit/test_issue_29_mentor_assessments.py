@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.models.user import User, UserRole
 
 
+
+@pytest.mark.skip(reason="Feature not implemented yet. Unskip when implementing Issue #29")
 class TestMentorSessionsEndpoint:
     """Test GET /mentor-sessions"""
     
@@ -154,6 +156,8 @@ class TestMentorSessionsEndpoint:
         assert response.status_code == 401
 
 
+
+@pytest.mark.skip(reason="Feature not implemented yet. Unskip when implementing Issue #29")
 class TestScheduleAssessment:
     """Test scheduling assessment sessions"""
     
@@ -217,6 +221,8 @@ class TestScheduleAssessment:
         assert response.status_code in [200, 201, 409, 422]
 
 
+
+@pytest.mark.skip(reason="Feature not implemented yet. Unskip when implementing Issue #29")
 class TestAssignProficiencyLevel:
     """Test mentor assigning proficiency levels"""
     

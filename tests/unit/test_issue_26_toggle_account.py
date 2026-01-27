@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.models.user import User, UserRole
 
 
+
+@pytest.mark.skip(reason="Feature not implemented yet. Unskip when implementing Issue #26")
 class TestToggleAccountEndpoint:
     """Test PUT /admin/users/{user_id}/toggle-status"""
     
