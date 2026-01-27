@@ -6,6 +6,7 @@ from app.models.user import User
 from app.schemas.user import UserCreate, UserResponse, Token, Login
 from app.core.config import settings
 from app.core.limiter import limiter
+from app.core.exceptions import DuplicateResourceException, AuthenticationException
 
 router = APIRouter()
 
@@ -18,9 +19,9 @@ def register(request: Request, user_in: UserCreate, db: Session = Depends(databa
     
     user = db.query(User).filter(User.email == user_in.email).first()
     if user:
-        raise HTTPException(
-            status_code=400,
-            detail="Email này đã được đăng ký.",
+        raise DuplicateResourceException(
+            resource="Email",
+            details={"email": user_in.email}
         )
     user = User(
         email=user_in.email,
@@ -39,10 +40,8 @@ def register(request: Request, user_in: UserCreate, db: Session = Depends(databa
 def login(request: Request, login_data: Login, db: Session = Depends(database.get_db)):
     user = db.query(User).filter(User.email == login_data.email).first()
     if not user or not security.verify_password(login_data.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email hoặc mật khẩu không chính xác",
-            headers={"WWW-Authenticate": "Bearer"},
+        raise AuthenticationException(
+            message="Email hoặc mật khẩu không chính xác"
         )
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(

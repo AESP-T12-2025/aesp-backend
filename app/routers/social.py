@@ -1,148 +1,148 @@
+"""
+Social Router
+=============
+Community features: mentor posts, comments, likes, and moderation.
+"""
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from datetime import datetime
+
 from app.core.database import get_db
-from app.models.social import MentorPost, PostComment, PostLike
-from app.models.user import User, UserRole
 from app.core.deps import get_current_user
+from app.core.utils import require_admin
+from app.models.social import MentorPost, PostComment, PostLike, ModerationStatus
+from app.models.user import User, UserRole
+
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/social", tags=["Social (Community)"])
 
-# --- Schemas ---
+
+# =============================================================================
+# SCHEMAS
+# =============================================================================
+
 class PostCreate(BaseModel):
-    content: str
-    image_url: Optional[str] = None
+    """Schema for creating a mentor post."""
+    content: str = Field(..., min_length=1, max_length=5000)
+    image_url: Optional[str] = Field(default=None, max_length=500)
+
 
 class CommentCreate(BaseModel):
-    content: str
+    """Schema for creating a comment."""
+    content: str = Field(..., min_length=1, max_length=1000)
+
 
 class PostResponse(BaseModel):
+    """Response schema for posts."""
     id: int
     mentor_id: int
     mentor_name: str
     content: str
-    image_url: Optional[str]
+    image_url: Optional[str] = None
     like_count: int
     comment_count: int
-    # created_at: datetime... (omitted for brevity)
+    created_at: Optional[datetime] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
-# --- APIs ---
+
+class AdminPostResponse(BaseModel):
+    """Response schema for admin post management."""
+    id: int
+    content: str
+    mentor_name: str
+    status: str
+    created_at: datetime
+
+
+# =============================================================================
+# PUBLIC ENDPOINTS
+# =============================================================================
 
 @router.post("/posts", response_model=PostResponse)
 def create_mentor_post(
-    post_data: PostCreate, 
-    db: Session = Depends(get_db), 
+    post_data: PostCreate,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != UserRole.MENTOR and current_user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Only Mentors can post")
+    """
+    Create a new community post.
+    
+    Only Mentors and Admins can create posts.
+    Posts are auto-approved for Mentors to reduce friction.
+    """
+    if current_user.role not in (UserRole.MENTOR, UserRole.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Mentors can post"
+        )
 
-    from app.models.social import ModerationStatus # Ensure import
-    
-    # Auto-approve for now or PENDING if we want strict moderation
-    # Let's set to APPROVED for Mentors to reduce friction, but ADMIN can change later
-    initial_status = ModerationStatus.APPROVED 
-    
     new_post = MentorPost(
         mentor_id=current_user.user_id,
         content=post_data.content,
         image_url=post_data.image_url,
-        moderation_status=initial_status
+        moderation_status=ModerationStatus.APPROVED
     )
     db.add(new_post)
     db.commit()
     db.refresh(new_post)
-    
-    return {
-        "id": new_post.id,
-        "mentor_id": new_post.mentor_id,
-        "mentor_name": current_user.full_name,
-        "content": new_post.content,
-        "image_url": new_post.image_url,
-        "like_count": 0,
-        "comment_count": 0
-    }
+
+    return PostResponse(
+        id=new_post.id,
+        mentor_id=new_post.mentor_id,
+        mentor_name=current_user.full_name or "Unknown",
+        content=new_post.content,
+        image_url=new_post.image_url,
+        like_count=0,
+        comment_count=0,
+        created_at=new_post.created_at
+    )
+
 
 @router.get("/posts", response_model=List[PostResponse])
 def get_community_feed(db: Session = Depends(get_db)):
-    from app.models.social import ModerationStatus
-    # Only show APPROVED posts
+    """
+    Get community feed with approved posts.
+    
+    Returns posts ordered by most recent first.
+    """
     posts = db.query(MentorPost).filter(
         MentorPost.moderation_status == ModerationStatus.APPROVED
     ).order_by(MentorPost.created_at.desc()).all()
-    
-    results = []
-    for p in posts:
-        mentor_name = p.mentor.full_name if p.mentor else "Unknown"
-        results.append({
-            "id": p.id,
-            "mentor_id": p.mentor_id,
-            "mentor_name": mentor_name,
-            "content": p.content,
-            "image_url": p.image_url,
-            "like_count": len(p.likes),
-            "comment_count": len(p.comments)
-        })
-    return results
 
-# --- Admin Moderation Endpoints ---
-@router.put("/admin/posts/{post_id}/moderate")
-def moderate_post(
-    post_id: int, 
-    status: str, # APPROVED, REJECTED
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
-        
-    post = db.query(MentorPost).filter(MentorPost.id == post_id).first()
-    if not post:
-        raise HTTPException(404, "Post not found")
-        
-    post.moderation_status = status
-    db.commit()
-    return {"message": f"Post {status}"}
-
-@router.get("/admin/posts")
-def get_admin_posts(
-    status: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
-        
-    query = db.query(MentorPost).order_by(MentorPost.created_at.desc())
-    if status:
-        query = query.filter(MentorPost.moderation_status == status)
-        
-    posts = query.all()
-    # Return simpler structure or reuse PostResponse
-    return [{
-        "id": p.id,
-        "content": p.content,
-        "mentor_name": p.mentor.full_name if p.mentor else "Unknown",
-        "status": p.moderation_status,
-        "created_at": p.created_at
-    } for p in posts]
+    return [
+        PostResponse(
+            id=p.id,
+            mentor_id=p.mentor_id,
+            mentor_name=p.mentor.full_name if p.mentor else "Unknown",
+            content=p.content,
+            image_url=p.image_url,
+            like_count=len(p.likes) if p.likes else 0,
+            comment_count=len(p.comments) if p.comments else 0,
+            created_at=p.created_at
+        )
+        for p in posts
+    ]
 
 
 @router.post("/posts/{post_id}/comments")
 def add_comment(
-    post_id: int, 
+    post_id: int,
     comment_data: CommentCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Add a comment to a post."""
     post = db.query(MentorPost).filter(MentorPost.id == post_id).first()
     if not post:
-        raise HTTPException(404, "Post not found")
-        
+        raise HTTPException(status_code=404, detail="Post not found")
+
     new_comment = PostComment(
         post_id=post_id,
         user_id=current_user.user_id,
@@ -150,28 +150,109 @@ def add_comment(
     )
     db.add(new_comment)
     db.commit()
+    
     return {"message": "Comment added successfully"}
+
 
 @router.post("/posts/{post_id}/like")
 def toggle_like(
-    post_id: int, 
+    post_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Toggle like on a post."""
     post = db.query(MentorPost).filter(MentorPost.id == post_id).first()
     if not post:
-        raise HTTPException(404, "Post not found")
-        
-    existing_like = db.query(PostLike).filter_by(post_id=post_id, user_id=current_user.user_id).first()
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    existing_like = db.query(PostLike).filter_by(
+        post_id=post_id,
+        user_id=current_user.user_id
+    ).first()
+
     if existing_like:
         db.delete(existing_like)
         db.commit()
-        return {"message": "Unliked"}
+        return {"message": "Unliked", "liked": False}
     else:
         new_like = PostLike(post_id=post_id, user_id=current_user.user_id)
         db.add(new_like)
         db.commit()
-        return {"message": "Liked"}
+        return {"message": "Liked", "liked": True}
+
+
+# =============================================================================
+# ADMIN MODERATION ENDPOINTS
+# =============================================================================
+
+@router.get("/admin/posts")
+def get_admin_posts(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all posts for admin moderation.
+    
+    Admin only.
+    """
+    require_admin(current_user)
+
+    query = db.query(MentorPost).order_by(MentorPost.created_at.desc())
+    
+    if status:
+        query = query.filter(MentorPost.moderation_status == status)
+
+    posts = query.all()
+    
+    return [
+        {
+            "id": p.id,
+            "content": p.content,
+            "mentor_name": p.mentor.full_name if p.mentor else "Unknown",
+            "status": p.moderation_status.value if hasattr(p.moderation_status, 'value') else p.moderation_status,
+            "created_at": p.created_at
+        }
+        for p in posts
+    ]
+
+
+@router.put("/admin/posts/{post_id}/moderate")
+def moderate_post(
+    post_id: int,
+    new_status: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Approve or reject a post.
+    
+    Admin only.
+    
+    Args:
+        new_status: APPROVED or REJECTED
+    """
+    require_admin(current_user)
+
+    post = db.query(MentorPost).filter(MentorPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    # Validate status
+    valid_statuses = ["APPROVED", "REJECTED", "PENDING"]
+    if new_status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {valid_statuses}"
+        )
+
+    post.moderation_status = new_status
+    db.commit()
+    
+    logger.info(f"Post {post_id} moderated to {new_status} by admin {current_user.email}")
+    
+    return {"message": f"Post {new_status.lower()}"}
+
 
 @router.delete("/admin/comments/{comment_id}")
 def delete_comment(
@@ -180,15 +261,17 @@ def delete_comment(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Admin only: Delete a specific comment (Moderation).
+    Delete a comment.
+    
+    Admin only.
     """
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
+    require_admin(current_user)
 
     comment = db.query(PostComment).filter(PostComment.id == comment_id).first()
     if not comment:
-        raise HTTPException(404, "Comment not found")
+        raise HTTPException(status_code=404, detail="Comment not found")
 
     db.delete(comment)
     db.commit()
+    
     return {"message": "Comment deleted successfully"}

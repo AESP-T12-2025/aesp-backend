@@ -1,25 +1,85 @@
-import google.generativeai as genai
-import os
+"""
+AI Service
+==========
+Provides AI-powered features using Google Gemini for:
+- Contextual chat (conversation practice)
+- Speech analysis (grammar, pronunciation, fluency)
+"""
+import logging
 import json
-from dotenv import load_dotenv
+from typing import Optional
 
-load_dotenv()
+import google.generativeai as genai
 
-# Configure Gemini
-GENAI_API_KEY = os.getenv("GEMINI_API_KEY")
+from app.core.config import settings
+
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+logger = logging.getLogger(__name__)
+
+# Get API key from settings or environment
+GENAI_API_KEY = getattr(settings, 'GEMINI_API_KEY', None)
+
 if not GENAI_API_KEY:
-    print("WARNING: GEMINI_API_KEY not found in .env")
+    import os
+    GENAI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-genai.configure(api_key=GENAI_API_KEY)
+if not GENAI_API_KEY:
+    logger.warning("⚠️ GEMINI_API_KEY not found in settings or environment")
+else:
+    genai.configure(api_key=GENAI_API_KEY)
+
+
+# =============================================================================
+# SERVICE CLASS
+# =============================================================================
 
 class GeminiService:
-    def __init__(self):
-        self.model = genai.GenerativeModel('gemini-2.5-flash')
+    """
+    AI service using Google Gemini for English learning features.
+    
+    Features:
+        - Contextual chat for conversation practice
+        - Speech analysis with detailed feedback
+    """
+    
+    def __init__(self, model_name: str = "gemini-2.0-flash"):
+        """
+        Initialize Gemini service.
+        
+        Args:
+            model_name: The Gemini model to use
+        """
+        self.model_name = model_name
+        try:
+            self.model = genai.GenerativeModel(model_name)
+            logger.info(f"✅ Gemini service initialized with model: {model_name}")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Gemini model: {e}")
+            self.model = None
 
-    async def chat_with_context(self, message: str, context: str) -> str:
+    async def chat_with_context(
+        self, 
+        message: str, 
+        context: str = "You are a helpful English tutor."
+    ) -> str:
         """
-        Generates a response from Gemini based on the user method and a specific context/persona.
+        Generate a response based on user message and context.
+        
+        Args:
+            message: User's message
+            context: Conversation context/persona
+            
+        Returns:
+            AI-generated response
         """
+        if not self.model:
+            logger.error("Gemini model not initialized")
+            return "Sorry, AI service is currently unavailable."
+        
         try:
             prompt = f"""
             Context: {context}
@@ -31,15 +91,25 @@ class GeminiService:
             """
             response = self.model.generate_content(prompt)
             return response.text
+            
         except Exception as e:
-            print(f"Gemini Chat Error: {e}")
+            logger.error(f"Gemini chat error: {e}", exc_info=True)
             return "Sorry, I'm having trouble processing your request right now."
 
     async def analyze_speech(self, text: str) -> dict:
         """
-        Analyzes the user's speech text for grammar and simulated pronunciation feedback.
-        Returns a JSON object with scores and corrections.
+        Analyze user's speech text for grammar, pronunciation, and fluency.
+        
+        Args:
+            text: The transcribed speech text to analyze
+            
+        Returns:
+            Dict containing scores and detailed feedback
         """
+        if not self.model:
+            logger.error("Gemini model not initialized")
+            return self._get_error_response()
+        
         try:
             prompt = f"""
             Act as an encouraging English Speaking Examiner.
@@ -54,34 +124,62 @@ class GeminiService:
             - Do NOT return single digit scores like 8 or 9, return 80 or 90.
 
             Return ONLY a JSON object with this exact structure:
-            {
+            {{
                 "grammar_score": (0-100),
                 "pronunciation_score": (0-100),
                 "fluency_score": (0-100),
                 "corrections": ["list of major errors only"],
                 "better_version": "A more natural native-like way to say this",
                 "detailed_feedback": "A short, encouraging comment",
-                "phonetic_analysis": {
+                "phonetic_analysis": {{
                     "transcription": "IPA transcription of user speech",
                     "mispronounced_words": [
-                        { "word": "example", "correct_ipa": "/ɪɡˈzɑːmpəl/", "issue": "stressed wrong syllable" }
+                        {{ "word": "example", "correct_ipa": "/ɪɡˈzɑːmpəl/", "issue": "stressed wrong syllable" }}
                     ]
-                }
-            }
+                }}
+            }}
             """
+            
             response = self.model.generate_content(prompt)
+            
             # Cleanup Markdown code blocks if present
-            cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(cleaned_text)
+            cleaned_text = response.text.strip()
+            if cleaned_text.startswith("```"):
+                cleaned_text = cleaned_text.split("```")[1]
+                if cleaned_text.startswith("json"):
+                    cleaned_text = cleaned_text[4:]
+                cleaned_text = cleaned_text.strip()
+            
+            result = json.loads(cleaned_text)
+            logger.debug(f"Speech analysis completed: scores={result.get('grammar_score')}")
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse AI response as JSON: {e}")
+            return self._get_error_response("Invalid AI response format")
+            
         except Exception as e:
-            print(f"Gemini Analysis Error: {e}")
-            return {
-                "grammar_score": 0,
-                "pronunciation_score": 0,
-                "fluency_score": 0,
-                "corrections": ["Error processing analysis"],
-                "better_version": "",
-                "detailed_feedback": "AI service unavailable."
+            logger.error(f"Gemini analysis error: {e}", exc_info=True)
+            return self._get_error_response()
+
+    def _get_error_response(self, message: str = "AI service unavailable.") -> dict:
+        """Return a standardized error response."""
+        return {
+            "grammar_score": 0,
+            "pronunciation_score": 0,
+            "fluency_score": 0,
+            "corrections": ["Error processing analysis"],
+            "better_version": "",
+            "detailed_feedback": message,
+            "phonetic_analysis": {
+                "transcription": "",
+                "mispronounced_words": []
             }
+        }
+
+
+# =============================================================================
+# SINGLETON INSTANCE
+# =============================================================================
 
 ai_service = GeminiService()

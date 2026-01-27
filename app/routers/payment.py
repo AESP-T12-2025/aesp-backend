@@ -1,42 +1,78 @@
+"""
+Payment Router
+==============
+Handles payment, packages, and subscription management.
+"""
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional, Any
-from pydantic import BaseModel
-from datetime import datetime, timedelta
+from pydantic import BaseModel, Field
+from datetime import datetime, timedelta, timezone
+
 from app.core.database import get_db
-from app.models.payment import ServicePackage, Transaction, UserSubscription, TransactionStatus
-from app.models.user import User
 from app.core.deps import get_current_user
+from app.core.utils import require_admin
+from app.models.payment import ServicePackage, Transaction, UserSubscription, TransactionStatus
+from app.models.user import User, UserRole
+
 
 router = APIRouter(prefix="/payment", tags=["Payment & Packages"])
 
-# --- Schemas ---
+
+# =============================================================================
+# SCHEMAS
+# =============================================================================
+
 class PackageResponse(BaseModel):
+    """Response schema for service packages."""
     id: int
     name: str
     price: float
-    description: Optional[str]
-    features: Optional[Any]  # Changed from dict to Any to support list or dict
+    description: Optional[str] = None
+    features: Optional[Any] = None  # Supports list or dict
     mentor_included: bool = False
     
     class Config:
-        orm_mode = True
+        from_attributes = True
+
 
 class PaymentRequest(BaseModel):
+    """Request schema for creating a payment transaction."""
     package_id: int
-    payment_method: str = "MOCK_BANKING"
+    payment_method: str = Field(default="MOCK_BANKING", description="Payment method")
 
-# --- APIs ---
+
+class PackageCreate(BaseModel):
+    """Schema for creating/updating a service package."""
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=500)
+    price: float = Field(..., ge=0)
+    duration_days: int = Field(default=30, ge=1, le=365)
+    features: Optional[List[str]] = None
+    mentor_included: bool = False
+    is_active: bool = True
+
+
+# =============================================================================
+# PUBLIC APIs
+# =============================================================================
 
 @router.get("/packages", response_model=List[PackageResponse])
 def list_packages(
     mentor_included: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
+    """
+    List all active service packages.
+    
+    Args:
+        mentor_included: Optional filter for mentor packages
+    """
     query = db.query(ServicePackage).filter(ServicePackage.is_active == True)
     if mentor_included is not None:
         query = query.filter(ServicePackage.mentor_included == mentor_included)
     return query.all()
+
 
 @router.post("/create-transaction")
 def create_mock_payment(
@@ -44,10 +80,15 @@ def create_mock_payment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """
+    Create a mock payment transaction (for development/testing).
+    
+    In production, this would integrate with a real payment gateway.
+    """
     # 1. Validate Package
     package = db.query(ServicePackage).filter(ServicePackage.id == req.package_id).first()
     if not package:
-        raise HTTPException(404, "Package not found")
+        raise HTTPException(status_code=404, detail="Package not found")
         
     # 2. Create Pending Transaction
     new_txn = Transaction(
@@ -61,14 +102,21 @@ def create_mock_payment(
     db.commit()
     db.refresh(new_txn)
     
-    # 3. MOCK: Auto-success for testing (In production, this would be a webhook callback)
-    # Automatically grant subscription
+    # 3. MOCK: Auto-success for testing
+    # In production, this would be handled by a webhook callback
     new_txn.status = TransactionStatus.SUCCESS
     
-    # Calculate end date
-    start_date = datetime.utcnow()
+    # Calculate subscription dates (timezone-aware)
+    start_date = datetime.now(timezone.utc)
     end_date = start_date + timedelta(days=package.duration_days)
     
+    # Deactivate existing active subscriptions
+    db.query(UserSubscription).filter(
+        UserSubscription.user_id == current_user.user_id,
+        UserSubscription.is_active == True
+    ).update({"is_active": False})
+    
+    # Create new subscription
     new_sub = UserSubscription(
         user_id=current_user.user_id,
         package_id=package.id,
@@ -77,24 +125,22 @@ def create_mock_payment(
         is_active=True
     )
     
-    # Deactivate old active subscriptions? (Optional business logic)
-    # db.query(UserSubscription).filter(user_id=...).update({is_active: False})
-    
     db.add(new_sub)
     db.commit()
     
     return {
         "message": "Payment successful (Mocked)",
         "transaction_id": new_txn.id,
-        "subscription_end_date": end_date
+        "subscription_end_date": end_date.isoformat()
     }
+
 
 @router.get("/my-subscription")
 def get_my_subscription(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get current user's active subscription"""
+    """Get current user's active subscription status."""
     sub = db.query(UserSubscription).filter(
         UserSubscription.user_id == current_user.user_id,
         UserSubscription.is_active == True
@@ -104,65 +150,97 @@ def get_my_subscription(
         return {"has_subscription": False, "plan": None}
     
     package = db.query(ServicePackage).filter(ServicePackage.id == sub.package_id).first()
+    now = datetime.now(timezone.utc)
+    
+    # Handle naive datetime comparison
+    end_date = sub.end_date
+    if end_date.tzinfo is None:
+        end_date = end_date.replace(tzinfo=timezone.utc)
     
     return {
         "has_subscription": True,
         "plan": package.name if package else "Unknown",
-        "status": "active" if sub.end_date > datetime.utcnow() else "expired",
+        "status": "active" if end_date > now else "expired",
         "start_date": sub.start_date.isoformat(),
         "end_date": sub.end_date.isoformat(),
         "package_id": sub.package_id
     }
 
-# --- Package CRUD (Admin) ---
-class PackageCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    price: float
-    duration_days: int = 30
-    features: Optional[List[str]] = None
-    mentor_included: bool = False
-    is_active: bool = True
 
-@router.post("/packages")
-def create_package(data: PackageCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role != "ADMIN":
-        raise HTTPException(403, "Admin only")
-    pkg = ServicePackage(**data.dict())
+# =============================================================================
+# ADMIN APIs - Package CRUD
+# =============================================================================
+
+@router.post("/packages", response_model=PackageResponse)
+def create_package(
+    data: PackageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new service package. Admin only."""
+    require_admin(current_user)
+    
+    pkg = ServicePackage(**data.model_dump())
     db.add(pkg)
     db.commit()
     db.refresh(pkg)
     return pkg
 
-@router.put("/packages/{package_id}")
-def update_package(package_id: int, data: PackageCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role != "ADMIN":
-        raise HTTPException(403, "Admin only")
+
+@router.put("/packages/{package_id}", response_model=PackageResponse)
+def update_package(
+    package_id: int,
+    data: PackageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update an existing service package. Admin only."""
+    require_admin(current_user)
+    
     pkg = db.query(ServicePackage).filter(ServicePackage.id == package_id).first()
     if not pkg:
-        raise HTTPException(404, "Package not found")
-    for k, v in data.dict().items():
-        setattr(pkg, k, v)
+        raise HTTPException(status_code=404, detail="Package not found")
+    
+    for key, value in data.model_dump().items():
+        setattr(pkg, key, value)
+    
     db.commit()
+    db.refresh(pkg)
     return pkg
 
+
 @router.delete("/packages/{package_id}")
-def delete_package(package_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role != "ADMIN":
-        raise HTTPException(403, "Admin only")
+def delete_package(
+    package_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a service package. Admin only."""
+    require_admin(current_user)
+    
     pkg = db.query(ServicePackage).filter(ServicePackage.id == package_id).first()
     if not pkg:
-        raise HTTPException(404, "Package not found")
+        raise HTTPException(status_code=404, detail="Package not found")
+    
     db.delete(pkg)
     db.commit()
-    return {"message": "Package deleted"}
+    return {"message": "Package deleted successfully"}
 
-# --- Upgrade/Cancel Subscription ---
+
+# =============================================================================
+# SUBSCRIPTION MANAGEMENT
+# =============================================================================
+
 @router.post("/upgrade")
-def upgrade_subscription(package_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def upgrade_subscription(
+    package_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Upgrade to a new subscription package."""
     package = db.query(ServicePackage).filter(ServicePackage.id == package_id).first()
     if not package:
-        raise HTTPException(404, "Package not found")
+        raise HTTPException(status_code=404, detail="Package not found")
     
     # Deactivate old subscriptions
     db.query(UserSubscription).filter(
@@ -170,9 +248,10 @@ def upgrade_subscription(package_id: int, db: Session = Depends(get_db), current
         UserSubscription.is_active == True
     ).update({"is_active": False})
     
-    # Create new subscription
-    start_date = datetime.utcnow()
+    # Create new subscription (timezone-aware)
+    start_date = datetime.now(timezone.utc)
     end_date = start_date + timedelta(days=package.duration_days)
+    
     new_sub = UserSubscription(
         user_id=current_user.user_id,
         package_id=package.id,
@@ -182,14 +261,27 @@ def upgrade_subscription(package_id: int, db: Session = Depends(get_db), current
     )
     db.add(new_sub)
     db.commit()
-    return {"message": "Subscription upgraded", "end_date": end_date.isoformat()}
+    
+    return {
+        "message": "Subscription upgraded successfully",
+        "end_date": end_date.isoformat()
+    }
+
 
 @router.post("/cancel")
-def cancel_subscription(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    db.query(UserSubscription).filter(
+def cancel_subscription(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Cancel user's active subscription."""
+    result = db.query(UserSubscription).filter(
         UserSubscription.user_id == current_user.user_id,
         UserSubscription.is_active == True
     ).update({"is_active": False})
+    
     db.commit()
-    return {"message": "Subscription cancelled"}
-
+    
+    if result == 0:
+        return {"message": "No active subscription to cancel"}
+    
+    return {"message": "Subscription cancelled successfully"}

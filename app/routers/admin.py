@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from datetime import datetime, timedelta
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.utils import require_admin, paginate
+from app.core.constants import DAYS_IN_WEEK, DEFAULT_PAGE_SIZE
 from app.models.user import User, UserRole
 from app.models.payment import Transaction, UserSubscription, ServicePackage
 from app.models.policy import SystemPolicy
@@ -18,19 +20,18 @@ def get_dashboard_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
+    require_admin(current_user)
     
     # User Stats
     total_users = db.query(User).count()
     learners = db.query(User).filter(User.role == UserRole.LEARNER).count()
     mentors = db.query(User).filter(User.role == UserRole.MENTOR).count()
-    new_users_7d = db.query(User).filter(User.created_at >= datetime.now() - timedelta(days=7)).count()
+    new_users_7d = db.query(User).filter(User.created_at >= datetime.now() - timedelta(days=DAYS_IN_WEEK)).count()
     
     # Revenue Stats
     total_revenue = db.query(func.sum(Transaction.amount)).scalar() or 0
     revenue_7d = db.query(func.sum(Transaction.amount)).filter(
-        Transaction.created_at >= datetime.now() - timedelta(days=7)
+        Transaction.created_at >= datetime.now() - timedelta(days=DAYS_IN_WEEK)
     ).scalar() or 0
     
     # Subscription Stats
@@ -41,7 +42,7 @@ def get_dashboard_stats(
     total_scenarios = db.query(Scenario).count()
     total_sessions = db.query(SpeakingSession).count()
     sessions_7d = db.query(SpeakingSession).filter(
-        SpeakingSession.start_time >= datetime.now() - timedelta(days=7)
+        SpeakingSession.start_time >= datetime.now() - timedelta(days=DAYS_IN_WEEK)
     ).count()
     
     # Mentor Stats
@@ -88,8 +89,7 @@ def create_policy(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
+    require_admin(current_user)
     
     policy = SystemPolicy(title=title, content=content, type=type)
     db.add(policy)
@@ -107,8 +107,7 @@ def update_user_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
+    require_admin(current_user)
     
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
@@ -125,9 +124,7 @@ def verify_mentor(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    from app.models.mentor import Mentor
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
+    require_admin(current_user)
         
     mentor = db.query(Mentor).filter(Mentor.mentor_id == mentor_id).first()
     if not mentor:
@@ -143,9 +140,7 @@ def create_package(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    from app.models.payment import ServicePackage
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
+    require_admin(current_user)
         
     pkg = ServicePackage(name=name, price=price, duration_days=duration_days, features=features, is_active=True)
     db.add(pkg)
@@ -158,9 +153,7 @@ def update_package(
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    from app.models.payment import ServicePackage
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
+    require_admin(current_user)
     
     pkg = db.query(ServicePackage).filter(ServicePackage.id == pkg_id).first()
     if not pkg: 
@@ -174,21 +167,25 @@ def update_package(
 
 @router.get("/transactions")
 def get_all_transactions(
+    skip: int = 0,
+    limit: int = DEFAULT_PAGE_SIZE,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin only")
+    require_admin(current_user)
     
-    # PERF FIX: Use joinedload to avoid N+1 queries
-    from sqlalchemy.orm import joinedload
-    transactions = db.query(Transaction).options(
+    # Build query with joinedload to avoid N+1 queries
+    query = db.query(Transaction).options(
         joinedload(Transaction.user),
         joinedload(Transaction.package)
-    ).order_by(Transaction.created_at.desc()).all()
+    ).order_by(Transaction.created_at.desc())
     
+    # Apply pagination
+    paginated = paginate(query, skip=skip, limit=limit)
+    
+    # Transform items
     result = []
-    for t in transactions:
+    for t in paginated["items"]:
         result.append({
             "transaction_id": t.id,
             "user_id": t.user_id,
@@ -199,5 +196,13 @@ def get_all_transactions(
             "status": t.status.value if hasattr(t.status, 'value') else t.status,
             "created_at": t.created_at.isoformat() if t.created_at else None
         })
-    return result
-
+    
+    return {
+        "items": result,
+        "total": paginated["total"],
+        "page": paginated["page"],
+        "per_page": paginated["per_page"],
+        "pages": paginated["pages"],
+        "has_next": paginated["has_next"],
+        "has_prev": paginated["has_prev"]
+    }
