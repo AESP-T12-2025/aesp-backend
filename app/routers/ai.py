@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+import logging
 from pydantic import BaseModel
 from app.services.ai_service import ai_service
 from app.services.tts_service import tts_service
@@ -7,11 +8,14 @@ from sqlalchemy.orm import Session
 from app.core import database
 from app.models.content import AIFeedback
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(
     prefix="/ai",
     tags=["AI Core"],
     responses={404: {"description": "Not found"}},
 )
+
 
 from typing import Optional
 
@@ -103,9 +107,7 @@ async def analyze_speech(
             db.commit()
             db.refresh(feedback)
         except Exception as e:
-            print(f"ERROR Saving AI Feedback & Stats: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error saving AI Feedback & Stats: {e}", exc_info=True)
             # Do not raise 500 here, just log it and return analysis so user still sees result
             # Or raise if critical. Let's return analysis but log error.
 

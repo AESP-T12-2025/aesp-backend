@@ -18,7 +18,7 @@ def get_dashboard_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role.value != "ADMIN":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
     
     # User Stats
@@ -88,7 +88,7 @@ def create_policy(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "ADMIN":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
     
     policy = SystemPolicy(title=title, content=content, type=type)
@@ -107,7 +107,7 @@ def update_user_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "ADMIN":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
     
     user = db.query(User).filter(User.user_id == user_id).first()
@@ -126,7 +126,7 @@ def verify_mentor(
     current_user: User = Depends(get_current_user)
 ):
     from app.models.mentor import Mentor
-    if current_user.role != "ADMIN":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
         
     mentor = db.query(Mentor).filter(Mentor.mentor_id == mentor_id).first()
@@ -144,7 +144,7 @@ def create_package(
     current_user: User = Depends(get_current_user)
 ):
     from app.models.payment import ServicePackage
-    if current_user.role != "ADMIN":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
         
     pkg = ServicePackage(name=name, price=price, duration_days=duration_days, features=features, is_active=True)
@@ -159,7 +159,7 @@ def update_package(
     current_user: User = Depends(get_current_user)
 ):
     from app.models.payment import ServicePackage
-    if current_user.role != "ADMIN":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
     
     pkg = db.query(ServicePackage).filter(ServicePackage.id == pkg_id).first()
@@ -177,20 +177,24 @@ def get_all_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role.value != "ADMIN":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
     
-    transactions = db.query(Transaction).order_by(Transaction.created_at.desc()).all()
+    # PERF FIX: Use joinedload to avoid N+1 queries
+    from sqlalchemy.orm import joinedload
+    transactions = db.query(Transaction).options(
+        joinedload(Transaction.user),
+        joinedload(Transaction.package)
+    ).order_by(Transaction.created_at.desc()).all()
+    
     result = []
     for t in transactions:
-        user = db.query(User).filter(User.user_id == t.user_id).first()
-        package = db.query(ServicePackage).filter(ServicePackage.id == t.package_id).first()
         result.append({
             "transaction_id": t.id,
             "user_id": t.user_id,
-            "user": {"full_name": user.full_name if user else None, "email": user.email if user else None},
+            "user": {"full_name": t.user.full_name if t.user else None, "email": t.user.email if t.user else None},
             "package_id": t.package_id,
-            "package": {"name": package.name if package else None},
+            "package": {"name": t.package.name if t.package else None},
             "amount": t.amount,
             "status": t.status.value if hasattr(t.status, 'value') else t.status,
             "created_at": t.created_at.isoformat() if t.created_at else None

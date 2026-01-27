@@ -138,7 +138,6 @@ def get_my_progress(
             "icon": "🏆" # Placeholder, could be in DB
         })
     return response
-    return response
 
 # --- Internal Helper ---
 # Called by other services (like AI or Auth) to update challenge progress

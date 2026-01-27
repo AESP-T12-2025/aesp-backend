@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.models.social import MentorPost, PostComment, PostLike
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.core.deps import get_current_user
 
 router = APIRouter(prefix="/social", tags=["Social (Community)"])
@@ -38,7 +38,7 @@ def create_mentor_post(
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "MENTOR" and current_user.role != "ADMIN":
+    if current_user.role != UserRole.MENTOR and current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Only Mentors can post")
 
     from app.models.social import ModerationStatus # Ensure import
@@ -97,7 +97,7 @@ def moderate_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "ADMIN":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
         
     post = db.query(MentorPost).filter(MentorPost.id == post_id).first()
@@ -114,7 +114,7 @@ def get_admin_posts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "ADMIN":
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
         
     query = db.query(MentorPost).order_by(MentorPost.created_at.desc())
@@ -172,3 +172,23 @@ def toggle_like(
         db.add(new_like)
         db.commit()
         return {"message": "Liked"}
+
+@router.delete("/admin/comments/{comment_id}")
+def delete_comment(
+    comment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Admin only: Delete a specific comment (Moderation).
+    """
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    comment = db.query(PostComment).filter(PostComment.id == comment_id).first()
+    if not comment:
+        raise HTTPException(404, "Comment not found")
+
+    db.delete(comment)
+    db.commit()
+    return {"message": "Comment deleted successfully"}

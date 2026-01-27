@@ -16,8 +16,8 @@ class UserTestResult(Base):
     __tablename__ = "user_test_results"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    test_id = Column(Integer, ForeignKey("proficiency_tests.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    test_id = Column(Integer, ForeignKey("proficiency_tests.id"), nullable=False, index=True)
     score = Column(Float, nullable=False)
     assessed_level = Column(String, nullable=False) # A1, A2, B1, ...
     completed_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -29,7 +29,7 @@ class LearningPath(Base):
     __tablename__ = "learning_paths"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
     current_level = Column(String, nullable=False)
     target_level = Column(String, nullable=False)
     generated_roadmap_json = Column(JSON, nullable=True) # List of recommended topics/challenges

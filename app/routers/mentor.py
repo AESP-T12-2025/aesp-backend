@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from datetime import datetime
 
@@ -53,19 +53,20 @@ def create_booking(
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    # 1. Kiểm tra slot có tồn tại và còn trống không
-    slot = db.query(AvailabilitySlot).filter(
+    # 1. ATOMIC UPDATE: Try to mark slot as BOOKED only if it is currently AVAILABLE
+    # This prevents race conditions where two users read "AVAILABLE" at the same time.
+    result = db.query(AvailabilitySlot).filter(
         AvailabilitySlot.slot_id == booking_in.slot_id, 
         AvailabilitySlot.status == BookingStatus.AVAILABLE
-    ).first()
+    ).update({"status": BookingStatus.BOOKED}, synchronize_session=False)
     
-    if not slot:
-        raise HTTPException(status_code=400, detail="Slot này không còn trống hoặc không tồn tại")
+    db.commit()
 
-    # 2. Cập nhật trạng thái slot thành BOOKED
-    slot.status = BookingStatus.BOOKED
-    
-    # 3. Tạo record Booking mới
+    if result == 0:
+        # If no rows were updated, it means the slot was NOT available (or doesn't exist)
+        raise HTTPException(status_code=400, detail="Slot này không còn trống hoặc không tồn tại (Race Condition Protected)")
+
+    # 2. Tạo record Booking mới (Safe to proceed)
     new_booking = Booking(
         slot_id=booking_in.slot_id,
         learner_id=current_user.user_id,
@@ -77,7 +78,9 @@ def create_booking(
         db.commit()
         db.refresh(new_booking)
     except Exception as e:
-        db.rollback()
+        # Rollback slot status if booking creation fails (rare)
+        db.query(AvailabilitySlot).filter(AvailabilitySlot.slot_id == booking_in.slot_id).update({"status": BookingStatus.AVAILABLE})
+        db.commit()
         raise HTTPException(status_code=500, detail=f"Lỗi hệ thống khi đặt lịch: {str(e)}")
 
     return {"message": "Đặt lịch thành công", "booking_id": new_booking.booking_id}
@@ -99,8 +102,6 @@ def create_slot(
         end_time=slot.end_time,
         status=BookingStatus.AVAILABLE
     )
-    db.add(new_slot)
-    db.commit()
     db.add(new_slot)
     db.commit()
     return {"message": "Slot created successfully"}
@@ -218,8 +219,11 @@ def get_my_assessments(
         raise HTTPException(400, "User is not a mentor")
     
     # Get assessments through booking -> slot -> mentor chain
+    # Optimization: Use joinedload to prevent N+1 queries when accessing learner details
     assessments = db.query(MentorAssessment).join(Booking).join(AvailabilitySlot).filter(
         AvailabilitySlot.mentor_id == mentor.mentor_id
+    ).options(
+        joinedload(MentorAssessment.booking).joinedload(Booking.learner)
     ).all()
     
     result = []

@@ -25,8 +25,8 @@ class UserChallenge(Base):
     __tablename__ = "user_challenges"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    challenge_id = Column(Integer, ForeignKey("challenges.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    challenge_id = Column(Integer, ForeignKey("challenges.id"), nullable=False, index=True)
     current_progress = Column(Integer, default=0)
     is_completed = Column(Boolean, default=False)
     is_claimed = Column(Boolean, default=False) # NEW: Track if reward is claimed
@@ -39,7 +39,7 @@ class UserDailyStats(Base):
     __tablename__ = "user_daily_stats"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
     date = Column(DateTime(timezone=True), server_default=func.current_date()) # Stores only date part usually logic handled
     speaking_duration_seconds = Column(Integer, default=0)
     words_learned = Column(Integer, default=0)

@@ -1,15 +1,21 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.core import security, database
 from app.models.user import User
 from app.schemas.user import UserCreate, UserResponse, Token, Login
 from app.core.config import settings
+from app.core.limiter import limiter
 
 router = APIRouter()
 
 @router.post("/auth/register", response_model=UserResponse)
-def register(user_in: UserCreate, db: Session = Depends(database.get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, user_in: UserCreate, db: Session = Depends(database.get_db)):
+    # Check if limiter is disabled for testing
+    if hasattr(request.app.state, 'limiter') and not request.app.state.limiter.enabled:
+        pass  # Skip rate limiting in tests
+    
     user = db.query(User).filter(User.email == user_in.email).first()
     if user:
         raise HTTPException(
@@ -18,10 +24,10 @@ def register(user_in: UserCreate, db: Session = Depends(database.get_db)):
         )
     user = User(
         email=user_in.email,
-        password_hash=security.get_password_hash(user_in.password), # Fixed: hashed_password -> password_hash
+        password_hash=security.get_password_hash(user_in.password),
         full_name=user_in.full_name,
         is_active=user_in.is_active,
-        role=user_in.role # Include role from request
+        role=user_in.role
     )
     db.add(user)
     db.commit()
@@ -29,7 +35,8 @@ def register(user_in: UserCreate, db: Session = Depends(database.get_db)):
     return user
 
 @router.post("/auth/login", response_model=Token)
-def login(login_data: Login, db: Session = Depends(database.get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, login_data: Login, db: Session = Depends(database.get_db)):
     user = db.query(User).filter(User.email == login_data.email).first()
     if not user or not security.verify_password(login_data.password, user.password_hash):
         raise HTTPException(

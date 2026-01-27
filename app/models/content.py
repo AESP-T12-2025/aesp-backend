@@ -30,7 +30,7 @@ class Topic(Base):
     __tablename__ = "topics"
 
     topic_id = Column(Integer, primary_key=True, index=True)
-    category_id = Column(Integer, ForeignKey("categories.category_id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.category_id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     image_url = Column(String, nullable=True)
@@ -43,7 +43,7 @@ class Scenario(Base):
     __tablename__ = "scenarios"
 
     scenario_id = Column(Integer, primary_key=True, index=True)
-    topic_id = Column(Integer, ForeignKey("topics.topic_id"), nullable=False)
+    topic_id = Column(Integer, ForeignKey("topics.topic_id"), nullable=False, index=True)
     title = Column(String, nullable=False)
     difficulty_level = Column(SqlEnum(DifficultyLevel), nullable=False)
     script_content = Column(Text, nullable=True) # Kịch bản mẫu cho AI đóng vai
@@ -55,8 +55,8 @@ class SpeakingSession(Base):
     __tablename__ = "speaking_sessions"
 
     session_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    scenario_id = Column(Integer, ForeignKey("scenarios.scenario_id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    scenario_id = Column(Integer, ForeignKey("scenarios.scenario_id"), nullable=False, index=True)
     start_time = Column(DateTime(timezone=True), server_default=func.now())
     end_time = Column(DateTime(timezone=True), nullable=True)
     score = Column(Integer, nullable=True) # Điểm số đánh giá (0-100)
@@ -69,7 +69,7 @@ class AIFeedback(Base):
     __tablename__ = "ai_feedbacks"
 
     feedback_id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("speaking_sessions.session_id"), nullable=True)
+    session_id = Column(Integer, ForeignKey("speaking_sessions.session_id"), nullable=True, index=True)
     user_input_text = Column(Text, nullable=False)
     grammar_score = Column(Integer, default=0)
     pronunciation_score = Column(Integer, default=0)

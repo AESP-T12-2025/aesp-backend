@@ -25,8 +25,8 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    package_id = Column(Integer, ForeignKey("service_packages.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    package_id = Column(Integer, ForeignKey("service_packages.id"), nullable=False, index=True)
     amount = Column(Float, nullable=False)
     status = Column(SqlEnum(TransactionStatus), default=TransactionStatus.PENDING)
     payment_method = Column(String, nullable=True) # e.g., "MOMO", "VNPAY", "MOCK"
@@ -39,8 +39,8 @@ class UserSubscription(Base):
     __tablename__ = "user_subscriptions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    package_id = Column(Integer, ForeignKey("service_packages.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    package_id = Column(Integer, ForeignKey("service_packages.id"), nullable=False, index=True)
     start_date = Column(DateTime(timezone=True), server_default=func.now())
     end_date = Column(DateTime(timezone=True), nullable=False)
     is_active = Column(Boolean, default=True)

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+import logging
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
@@ -6,6 +7,8 @@ from app.core.database import get_db
 from app.models.proficiency import ProficiencyTest, UserTestResult, LearningPath
 from app.models.user import User
 from app.core.deps import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/proficiency", tags=["Proficiency & Adaptive Learning"])
 
@@ -74,7 +77,7 @@ async def submit_test(
             score = (score * 0.7) + (speaking_score * 0.3)
             ai_feedback = ai_res.get("detailed_feedback") or "Good effort!"
         except Exception as e:
-            print(f"AI Error: {e}") 
+            logger.error(f"AI speech analysis error: {e}") 
     
     score = min(100, score) # Cap at 100
 

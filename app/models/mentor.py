@@ -14,7 +14,7 @@ class Mentor(Base):
     __tablename__ = "mentors"
 
     mentor_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, unique=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, unique=True, index=True)
     full_name = Column(String, nullable=False)
     bio = Column(Text, nullable=True)
     skills = Column(String, nullable=True) # Comma separated skills for simplicity per PR
@@ -27,7 +27,7 @@ class AvailabilitySlot(Base):
     __tablename__ = "availability_slots"
 
     slot_id = Column(Integer, primary_key=True, index=True)
-    mentor_id = Column(Integer, ForeignKey("mentors.mentor_id"), nullable=False)
+    mentor_id = Column(Integer, ForeignKey("mentors.mentor_id"), nullable=False, index=True)
     start_time = Column(DateTime(timezone=True), nullable=False)
     end_time = Column(DateTime(timezone=True), nullable=False)
     status = Column(SqlEnum(BookingStatus), default=BookingStatus.AVAILABLE)
@@ -39,8 +39,8 @@ class Booking(Base):
     __tablename__ = "bookings"
 
     booking_id = Column(Integer, primary_key=True, index=True)
-    slot_id = Column(Integer, ForeignKey("availability_slots.slot_id"), nullable=False, unique=True)
-    learner_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    slot_id = Column(Integer, ForeignKey("availability_slots.slot_id"), nullable=False, unique=True, index=True)
+    learner_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     status = Column(String, default="CONFIRMED")
 
@@ -52,7 +52,7 @@ class MentorAssessment(Base):
     __tablename__ = "mentor_assessments"
 
     assessment_id = Column(Integer, primary_key=True, index=True)
-    booking_id = Column(Integer, ForeignKey("bookings.booking_id"), nullable=False)
+    booking_id = Column(Integer, ForeignKey("bookings.booking_id"), nullable=False, index=True)
     score = Column(Integer, nullable=True)
     feedback = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

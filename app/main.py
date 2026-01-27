@@ -32,16 +32,36 @@ import os
 # Tạo bảng trong DB (tạm thời dùng cách này thay vì alembic cho nhanh giai đoạn đầu)
 Base.metadata.create_all(bind=engine)
 
+# SECURITY: Rate Limiting Setup
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.limiter import limiter
+
 # Khởi tạo ứng dụng
 app = FastAPI(title="AESP Backend API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Mount static directory for audio files
 os.makedirs("app/static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-# Cấu hình CORS
+# Cấu hình CORS - Security: Only allow specific origins
 from fastapi.middleware.cors import CORSMiddleware
-origins = ["*"]
+import logging
+
+logger = logging.getLogger(__name__)
+
+# SECURITY FIX: Restrict CORS to specific origins only
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://aesp-frontend.vercel.app",
+    os.getenv("FRONTEND_URL", ""),  # Optional additional origin from env
+]
+# Filter out empty strings
+origins = [origin for origin in ALLOWED_ORIGINS if origin]
+
+logger.info(f"CORS allowed origins: {origins}")
 
 app.add_middleware(
     CORSMiddleware,

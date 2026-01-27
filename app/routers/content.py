@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+import logging
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.core import database, deps
 from app.models.content import Category, Topic, Scenario
 from app.schemas.content import CategoryResponse, TopicResponse, ScenarioResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -102,7 +105,7 @@ def create_topic(
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    # check_admin(current_user) # Uncomment to enforce Admin
+    check_admin(current_user)  # SECURITY: Enforce Admin
     new_topic = Topic(**topic.dict())
     db.add(new_topic)
     db.commit()
@@ -119,7 +122,7 @@ def update_topic(
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    # check_admin(current_user)
+    check_admin(current_user)  # SECURITY: Enforce Admin
     topic = db.query(Topic).filter(Topic.topic_id == id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
@@ -140,7 +143,7 @@ def delete_topic(
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    # check_admin(current_user)
+    check_admin(current_user)  # SECURITY: Enforce Admin
     topic = db.query(Topic).filter(Topic.topic_id == id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
@@ -155,7 +158,7 @@ def create_scenario(
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    # check_admin(current_user)
+    check_admin(current_user)  # SECURITY: Enforce Admin
     new_scenario = Scenario(**scenario.dict())
     db.add(new_scenario)
     db.commit()
@@ -169,7 +172,7 @@ def update_scenario(
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    # check_admin(current_user)
+    check_admin(current_user)  # SECURITY: Enforce Admin
     scenario = db.query(Scenario).filter(Scenario.scenario_id == id).first()
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
@@ -231,11 +234,7 @@ def create_speaking_session(
         
         return {
             "session_id": new_session.session_id,
-            "message": "Session started successfully",
-            "scenario_title": scenario.title
         }
     except Exception as e:
-        print(f"ERROR Creating Session: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
+        logger.error(f"Error creating session: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Server Error creating session")
