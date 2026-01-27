@@ -1,0 +1,136 @@
+name: Backend Tests
+
+on:
+  push:
+    branches: [ main, develop, official ]
+  pull_request:
+    branches: [ main, develop, official ]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: aesp_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      working-directory: ./aesp-backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+    
+    - name: Run tests
+      id: pytest
+      working-directory: ./aesp-backend
+      env:
+        DATABASE_URL: postgresql://test:test@localhost:5432/aesp_test
+        SECRET_KEY: test-secret-key-for-ci
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        pytest tests/ -v --tb=short --cov=app --cov-report=term 2>&1 | tee test-output.txt
+        echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+    
+    - name: Parse test results
+      if: always()
+      id: results
+      working-directory: ./aesp-backend
+      run: |
+        PASSED=$(grep -oP '\d+(?= passed)' test-output.txt | head -1 || echo "0")
+        FAILED=$(grep -oP '\d+(?= failed)' test-output.txt | head -1 || echo "0")
+        SKIPPED=$(grep -oP '\d+(?= skipped)' test-output.txt | head -1 || echo "0")
+        echo "passed=$PASSED" >> $GITHUB_OUTPUT
+        echo "failed=$FAILED" >> $GITHUB_OUTPUT
+        echo "skipped=$SKIPPED" >> $GITHUB_OUTPUT
+    
+    - name: Comment PR with results
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const passed = '${{ steps.results.outputs.passed }}' || '0';
+          const failed = '${{ steps.results.outputs.failed }}' || '0';
+          const skipped = '${{ steps.results.outputs.skipped }}' || '0';
+          
+          const status = failed === '0' ? 'PASSED' : 'FAILED';
+          const emoji = failed === '0' ? ':white_check_mark:' : ':x:';
+          
+          const body = `## ${emoji} Test Results: ${status}
+          
+          | Metric | Value |
+          |--------|-------|
+          | Passed | ${passed} |
+          | Failed | ${failed} |
+          | Skipped | ${skipped} |
+          
+          ${failed === '0' ? ':rocket: All tests passed! Ready to merge.' : ':warning: Tests failed. Please fix before merging.'}
+          `;
+          
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          const botComment = comments.find(c => c.user.type === 'Bot' && c.body.includes('Test Results'));
+          
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: body
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+          }
+    
+    - name: Generate summary
+      if: always()
+      run: |
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "- Passed: ${{ steps.results.outputs.passed }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Failed: ${{ steps.results.outputs.failed }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Skipped: ${{ steps.results.outputs.skipped }}" >> $GITHUB_STEP_SUMMARY
+    
+    - name: Fail if tests failed
+      if: steps.results.outputs.failed != '0'
+      run: exit 1

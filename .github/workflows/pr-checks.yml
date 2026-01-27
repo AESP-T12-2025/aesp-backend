@@ -1,0 +1,46 @@
+name: PR Quality Checks
+
+on:
+  pull_request:
+    branches: [ main, develop, official ]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pr-checks:
+    name: PR Validation
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Check PR title format
+      run: |
+        PR_TITLE="${{ github.event.pull_request.title }}"
+        if ! echo "$PR_TITLE" | grep -qE '^\[(feat|fix|test|docs|refactor|chore)\]'; then
+          echo "PR title must start with [feat], [fix], [test], [docs], [refactor], or [chore]"
+          echo "Example: [feat] Add enable/disable account toggle"
+          exit 1
+        fi
+    
+    - name: Check PR description
+      run: |
+        PR_BODY="${{ github.event.pull_request.body }}"
+        if [ -z "$PR_BODY" ]; then
+          echo "PR description is empty. Please add a description."
+          exit 1
+        fi
+    
+    - name: Check file changes
+      run: |
+        CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
+        echo "Files changed: $CHANGED_FILES"
+        if [ "$CHANGED_FILES" -gt 20 ]; then
+          echo "Warning: Large PR with $CHANGED_FILES files. Consider splitting."
+        fi
