@@ -106,11 +106,22 @@ def create_topic(
     current_user: User = Depends(deps.get_current_user)
 ):
     check_admin(current_user)  # SECURITY: Enforce Admin
-    new_topic = Topic(**topic.dict())
-    db.add(new_topic)
-    db.commit()
-    db.refresh(new_topic)
-    return new_topic
+    
+    # Validate category exists (FK integrity)
+    category = db.query(Category).filter(Category.category_id == topic.category_id).first()
+    if not category:
+        raise HTTPException(status_code=400, detail="Invalid category_id - category does not exist")
+    
+    try:
+        new_topic = Topic(**topic.dict())
+        db.add(new_topic)
+        db.commit()
+        db.refresh(new_topic)
+        return new_topic
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating topic: {e}")
+        raise HTTPException(status_code=500, detail="Error creating topic")
 
 @router.put("/topics/{id}", response_model=TopicResponse)
 def update_topic(
@@ -156,11 +167,22 @@ def create_scenario(
     current_user: User = Depends(deps.get_current_user)
 ):
     check_admin(current_user)  # SECURITY: Enforce Admin
-    new_scenario = Scenario(**scenario.dict())
-    db.add(new_scenario)
-    db.commit()
-    db.refresh(new_scenario)
-    return new_scenario
+    
+    # Validate topic exists (FK integrity)
+    topic = db.query(Topic).filter(Topic.topic_id == scenario.topic_id).first()
+    if not topic:
+        raise HTTPException(status_code=400, detail="Invalid topic_id - topic does not exist")
+    
+    try:
+        new_scenario = Scenario(**scenario.dict())
+        db.add(new_scenario)
+        db.commit()
+        db.refresh(new_scenario)
+        return new_scenario
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating scenario: {e}")
+        raise HTTPException(status_code=500, detail="Error creating scenario")
 
 @router.put("/scenarios/{id}", response_model=ScenarioResponse)
 def update_scenario(
