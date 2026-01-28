@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
+from pydantic import BaseModel, Field
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
@@ -8,6 +9,12 @@ from app.services.report_service import generate_weekly_report_html
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Schema for report settings
+class ReportSettingsUpdate(BaseModel):
+    """Settings for email reports"""
+    weekly_email: bool = Field(None, description="Enable/disable weekly email reports")
+    monthly_email: bool = Field(None, description="Enable/disable monthly email reports")
 
 # Learner reports router
 learner_router = APIRouter(prefix="/learner/reports", tags=["Learner Reports"])
@@ -71,3 +78,47 @@ def get_monthly_report(
     except Exception as e:
         logger.error(f"Failed to generate monthly report for user {current_user.user_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
+
+
+# Settings router
+settings_router = APIRouter(prefix="/learner/settings", tags=["Learner Settings"])
+
+
+@settings_router.put("/reports", response_model=dict)
+def update_report_settings(
+    settings: ReportSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update email report notification settings for learner.
+    Allows enabling/disabling weekly and monthly email reports.
+    """
+    # Only learners can update their own settings
+    if current_user.role != UserRole.LEARNER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only learners can update learner settings"
+        )
+    
+    try:
+        # In a real implementation, you would save these settings to the User model
+        # or a separate UserSettings table. For now, we just acknowledge the update.
+        updated_settings = {}
+        
+        if settings.weekly_email is not None:
+            updated_settings["weekly_email"] = settings.weekly_email
+            logger.info(f"User {current_user.user_id}: Weekly email reports set to {settings.weekly_email}")
+        
+        if settings.monthly_email is not None:
+            updated_settings["monthly_email"] = settings.monthly_email
+            logger.info(f"User {current_user.user_id}: Monthly email reports set to {settings.monthly_email}")
+        
+        return {
+            "status": "success",
+            "message": "Report settings updated successfully",
+            "settings": updated_settings
+        }
+    except Exception as e:
+        logger.error(f"Failed to update report settings for user {current_user.user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}")

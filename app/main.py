@@ -200,6 +200,7 @@ app.include_router(analytics.router, tags=["Analytics"])
 
 # Reports routers
 app.include_router(reports.learner_router, tags=["Reports"])
+app.include_router(reports.settings_router, tags=["Settings"])
 
 # Utility routers
 app.include_router(upload.router, tags=["Upload"])
