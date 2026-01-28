@@ -10,6 +10,7 @@ class PeerSession(Base):
     user1_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     user2_id = Column(Integer, ForeignKey("users.user_id"), nullable=True) # Nullable if waiting
     topic_id = Column(String, nullable=True)
+    level = Column(String, nullable=True)
     status = Column(String, default="WAITING") # WAITING, MATCHED, COMPLETED
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
