@@ -16,6 +16,7 @@ edge-tts
 httpx
 slowapi
 aiofiles
+apscheduler
 
 # Testing dependencies
 pytest

@@ -20,6 +20,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from app.core.database import engine, Base, create_all_tables
 from app.core.limiter import limiter
@@ -76,6 +78,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # Create static directory for audio files
     os.makedirs("app/static", exist_ok=True)
+    os.makedirs("app/static/reports", exist_ok=True)
+    
+    # Start scheduler
+    scheduler = AsyncIOScheduler()
+    app.state.scheduler = scheduler
+    
+    # Schedule weekly reports at 00:00 every Monday
+    from app.services.report_service import generate_weekly_reports_for_all
+    scheduler.add_job(
+        generate_weekly_reports_for_all,
+        CronTrigger(day_of_week='mon', hour=0, minute=0),
+        id='weekly_reports',
+        name='Send Weekly Reports Emails'
+    )
+    scheduler.start()
+    logger.info("📅 Weekly reports email scheduler started (Monday 00:00)")
     
     logger.info("✅ AESP Backend started successfully!")
     
@@ -83,6 +101,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # SHUTDOWN
     logger.info("👋 Shutting down AESP Backend...")
+    scheduler.shutdown()
 
 
 # =============================================================================
