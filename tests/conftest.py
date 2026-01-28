@@ -331,4 +331,3 @@ def test_topic(db: Session, test_category):
     db.commit()
     db.refresh(topic)
     return topic
-
