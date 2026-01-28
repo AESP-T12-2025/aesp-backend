@@ -1,0 +1,71 @@
+name: CI - Tests
+
+on:
+  pull_request:
+    branches: [ official, main ]
+  push:
+    branches: [ official, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Extract issue number from branch name
+      id: issue
+      run: |
+        BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+        echo "Branch name: $BRANCH_NAME"
+        
+        # Extract issue number from branch name (e.g., fix/issue-41-content-routes -> 41)
+        if [[ $BRANCH_NAME =~ issue-([0-9]+) ]]; then
+          ISSUE_NUM="${BASH_REMATCH[1]}"
+          echo "issue_num=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
+          echo "Found issue number: $ISSUE_NUM"
+        else
+          echo "issue_num=all" >> "$GITHUB_OUTPUT"
+          echo "No issue number found, will run all tests"
+        fi
+    
+    - name: Run tests for specific issue
+      run: |
+        ISSUE_NUM="${{ steps.issue.outputs.issue_num }}"
+        
+        if [ "$ISSUE_NUM" = "all" ]; then
+          echo "Running all tests..."
+          python -m pytest tests/ -v --tb=short --color=yes
+        else
+          echo "Running tests for Issue #$ISSUE_NUM..."
+          TEST_FILE="tests/unit/test_issue_${ISSUE_NUM}_*.py"
+          
+          if ls $TEST_FILE 1> /dev/null 2>&1; then
+            python -m pytest $TEST_FILE -v --tb=short --color=yes
+          else
+            echo "⚠️  No test file found matching: $TEST_FILE"
+            echo "Falling back to running all tests..."
+            python -m pytest tests/ -v --tb=short --color=yes
+          fi
+        fi
+      env:
+        DATABASE_URL: sqlite:///./test.db
+        SECRET_KEY: test-secret-key-for-ci

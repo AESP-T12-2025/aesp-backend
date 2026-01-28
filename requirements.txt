@@ -16,3 +16,8 @@ edge-tts
 httpx
 slowapi
 aiofiles
+
+# Testing dependencies
+pytest
+pytest-asyncio
+pytest-cov

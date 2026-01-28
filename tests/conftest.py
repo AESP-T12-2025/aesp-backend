@@ -269,3 +269,65 @@ def create_learner_booking(db: Session, learner_user: User) -> Callable:
         return FakeBooking()
     return _create
 
+
+# ========== Token Fixtures (for simpler auth) ==========
+
+@pytest.fixture
+def admin_token(client: TestClient, admin_user: User) -> str:
+    """Get admin JWT token"""
+    response = client.post("/auth/login", json={
+        "email": admin_user.email,
+        "password": "TestPassword123!"
+    })
+    return response.json().get("access_token", "")
+
+
+@pytest.fixture
+def learner_token(client: TestClient, learner_user: User) -> str:
+    """Get learner JWT token"""
+    response = client.post("/auth/login", json={
+        "email": learner_user.email,
+        "password": "TestPassword123!"
+    })
+    return response.json().get("access_token", "")
+
+
+@pytest.fixture
+def mentor_token(client: TestClient, mentor_user: User) -> str:
+    """Get mentor JWT token"""
+    response = client.post("/auth/login", json={
+        "email": mentor_user.email,
+        "password": "TestPassword123!"
+    })
+    return response.json().get("access_token", "")
+
+
+# ========== Content Fixtures ==========
+
+@pytest.fixture
+def test_category(db: Session):
+    """Create a test category for content tests"""
+    from app.models.content import Category
+    category = Category(
+        name="Business English",
+        description="Professional communication scenarios"
+    )
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+@pytest.fixture
+def test_topic(db: Session, test_category):
+    """Create a test topic for scenario tests"""
+    from app.models.content import Topic
+    topic = Topic(
+        category_id=test_category.category_id,
+        name="Job Interviews",
+        description="Prepare for professional interviews"
+    )
+    db.add(topic)
+    db.commit()
+    db.refresh(topic)
+    return topic
