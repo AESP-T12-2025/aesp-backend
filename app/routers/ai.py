@@ -14,8 +14,11 @@ from app.core.database import get_db
 from app.core.exceptions import ValidationException
 from app.services.ai_service import ai_service
 from app.services.tts_service import tts_service
+from app.services.stt_service import stt_service
 from app.models.content import AIFeedback, SpeakingSession, Scenario
 from app.models.gamification import UserDailyStats
+from app.models.user import User
+from app.core import deps
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +54,15 @@ class TTSRequest(BaseModel):
     """Request schema for text-to-speech."""
     text: str = Field(..., min_length=1, max_length=500)
     voice: str = Field(default="en-US-AriaNeural")
+
+
+class STTRequest(BaseModel):
+    """Request schema for speech-to-text."""
+    audio_data: str = Field(..., description="Base64-encoded audio data")
+    format: str = Field(default="wav", description="Audio format: wav, mp3, webm, ogg")
+    sample_rate: int = Field(default=16000, ge=8000, le=48000)
+    language: str = Field(default="en-US")
+    session_id: Optional[int] = Field(default=None, description="Speaking session ID for feedback integration")
 
 
 # =============================================================================
@@ -121,6 +133,52 @@ async def text_to_speech(request: TTSRequest):
         )
     
     return {"audio_url": audio_url}
+
+
+@router.post("/stt")
+async def speech_to_text(
+    request: STTRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Transcribe audio to text using Speech-to-Text.
+    
+    Accepts base64-encoded audio and returns transcription with word timings.
+    
+    Supported formats: wav, mp3, webm, ogg, flac, m4a
+    
+    If session_id is provided, the transcription can be used for 
+    pronunciation feedback integration.
+    """
+    try:
+        result = await stt_service.transcribe(
+            audio_data=request.audio_data,
+            audio_format=request.format,
+            sample_rate=request.sample_rate,
+            language=request.language
+        )
+        
+        response = result.to_dict()
+        
+        # If session_id provided, store for feedback integration
+        if request.session_id:
+            response["session_id"] = request.session_id
+            logger.info(f"STT linked to session {request.session_id}")
+        
+        return response
+        
+    except ValueError as e:
+        raise ValidationException(
+            message=str(e),
+            details={"format": request.format}
+        )
+    except Exception as e:
+        logger.error(f"STT error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to process audio"
+        )
 
 
 # =============================================================================

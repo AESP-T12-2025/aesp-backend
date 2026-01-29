@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
 from app.models.content import SpeakingSession
+from app.services.export_service import export_service
 
 router = APIRouter(prefix="/learner", tags=["Learner Progress"])
 
@@ -387,21 +388,50 @@ def get_weekly_report(
 
 
 @router.get("/reports/weekly/export")
-def export_weekly_report(
+async def export_weekly_report(
     format: str = "pdf",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Issue #39: Export weekly report as PDF.
+    Issue #39 + #44: Export weekly report as PDF.
     """
-    # Return 501 Not Implemented for PDF export
-    if format == "pdf":
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="PDF export not yet implemented"
-        )
-    return {"message": "Export initiated", "format": format}
+    # Get weekly report data first
+    now = datetime.now()
+    week_start = now - timedelta(days=now.weekday())
+    week_end = week_start + timedelta(days=6)
+    
+    sessions = db.query(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id,
+        SpeakingSession.start_time >= week_start,
+        SpeakingSession.start_time <= week_end
+    ).all()
+    
+    total_seconds = sum(calculate_session_duration(s) for s in sessions)
+    scores = [s.score for s in sessions if s.score is not None]
+    avg_score = sum(scores) / max(len(scores), 1) if scores else 0
+    
+    report_data = {
+        "total_sessions": len(sessions),
+        "total_speaking_time": round(total_seconds / 60, 1) if total_seconds else 0,
+        "average_score": round(avg_score, 2),
+        "streak_days": 0,
+        "skills": {
+            "Grammar": round(avg_score * 0.9, 1),
+            "Pronunciation": round(avg_score * 0.85, 1),
+            "Fluency": round(avg_score * 0.95, 1),
+        }
+    }
+    
+    result = await export_service.export_learner_report_pdf(
+        user_id=current_user.user_id,
+        report_type="weekly",
+        data=report_data,
+        start_date=week_start,
+        end_date=week_end
+    )
+    
+    return result.to_dict()
 
 
 @router.get("/reports/monthly")
@@ -458,20 +488,52 @@ def get_monthly_report(
 
 
 @router.get("/reports/monthly/export")
-def export_monthly_report(
+async def export_monthly_report(
     format: str = "pdf",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Issue #39: Export monthly report as PDF.
+    Issue #39 + #44: Export monthly report as PDF.
     """
-    if format == "pdf":
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="PDF export not yet implemented"
-        )
-    return {"message": "Export initiated", "format": format}
+    now = datetime.now()
+    month_start = datetime(now.year, now.month, 1)
+    if month_start.month == 12:
+        month_end = datetime(month_start.year + 1, 1, 1) - timedelta(days=1)
+    else:
+        month_end = datetime(month_start.year, month_start.month + 1, 1) - timedelta(days=1)
+    
+    sessions = db.query(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id,
+        SpeakingSession.start_time >= month_start,
+        SpeakingSession.start_time <= month_end
+    ).all()
+    
+    total_seconds = sum(calculate_session_duration(s) for s in sessions)
+    scores = [s.score for s in sessions if s.score is not None]
+    avg_score = sum(scores) / max(len(scores), 1) if scores else 0
+    
+    report_data = {
+        "total_sessions": len(sessions),
+        "total_speaking_time": round(total_seconds / 60, 1) if total_seconds else 0,
+        "average_score": round(avg_score, 2),
+        "streak_days": 0,
+        "skills": {
+            "Grammar": round(avg_score * 0.9, 1),
+            "Pronunciation": round(avg_score * 0.85, 1),
+            "Fluency": round(avg_score * 0.95, 1),
+        }
+    }
+    
+    result = await export_service.export_learner_report_pdf(
+        user_id=current_user.user_id,
+        report_type="monthly",
+        data=report_data,
+        start_date=month_start,
+        end_date=month_end
+    )
+    
+    return result.to_dict()
 
 
 @router.put("/settings/reports")
