@@ -167,6 +167,16 @@ def get_my_subscription(
     }
 
 
+# Alias for /my-subscription (Issue #42 tests use this path)
+@router.get("/subscription")
+def get_subscription_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get current user's subscription - alias for /my-subscription"""
+    return get_my_subscription(db, current_user)
+
+
 # =============================================================================
 # ADMIN APIs - Package CRUD
 # =============================================================================

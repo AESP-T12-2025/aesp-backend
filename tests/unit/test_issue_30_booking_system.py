@@ -15,7 +15,12 @@ from app.models.mentor import Mentor, AvailabilitySlot, Booking, BookingStatus
 
 @pytest.fixture
 def mentor_profile(db: Session, mentor_user: User) -> Mentor:
-    """Create mentor profile for testing"""
+    """Get or create mentor profile for testing"""
+    # Check if already exists (created by mentor_user fixture)
+    existing = db.query(Mentor).filter(Mentor.user_id == mentor_user.user_id).first()
+    if existing:
+        return existing
+    
     mentor = Mentor(
         user_id=mentor_user.user_id,
         full_name="Test Mentor",

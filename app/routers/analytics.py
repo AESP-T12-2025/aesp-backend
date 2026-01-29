@@ -226,6 +226,95 @@ def get_monthly_stats(
     }
 
 
+# =============================================================================
+# Issue #35: Progress Analytics & Heat Maps (Learner)
+# =============================================================================
+
+@router.get("/learner/heatmap")
+def get_learning_heatmap(
+    days: int = 365,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Issue #35: Learning activity heatmap (GitHub-style).
+    Returns daily activity levels for the specified number of days.
+    """
+    from app.models.content import SpeakingSession
+    from sqlalchemy import cast, Date
+    
+    start_date = datetime.now() - timedelta(days=days)
+    
+    # Get daily session counts
+    stats = db.query(
+        cast(SpeakingSession.start_time, Date).label("date"),
+        func.count(SpeakingSession.session_id).label("count")
+    ).filter(
+        SpeakingSession.user_id == current_user.user_id,
+        SpeakingSession.start_time >= start_date
+    ).group_by(
+        cast(SpeakingSession.start_time, Date)
+    ).all()
+    
+    # Convert to heatmap format (0-4 intensity levels)
+    result = []
+    for s in stats:
+        # Calculate intensity level based on session count
+        if s.count >= 5:
+            level = 4
+        elif s.count >= 3:
+            level = 3
+        elif s.count >= 2:
+            level = 2
+        elif s.count >= 1:
+            level = 1
+        else:
+            level = 0
+            
+        result.append({
+            "date": str(s.date),
+            "count": s.count,
+            "level": level
+        })
+    
+    return {
+        "days": days,
+        "data": result,
+        "total_sessions": sum(s.count for s in stats)
+    }
+
+@router.get("/learner/skills-radar")
+def get_skills_radar(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Issue #35: Skills radar chart data.
+    Returns average scores for grammar, fluency, pronunciation.
+    """
+    from app.models.content import SpeakingSession, AIFeedback
+    
+    # Get average AI feedback scores
+    feedback = db.query(
+        func.avg(AIFeedback.grammar_score).label("grammar"),
+        func.avg(AIFeedback.fluency_score).label("fluency"),
+        func.avg(AIFeedback.pronunciation_score).label("pronunciation")
+    ).join(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id
+    ).first()
+    
+    return {
+        "grammar": round(float(feedback.grammar or 0), 1),
+        "fluency": round(float(feedback.fluency or 0), 1),
+        "pronunciation": round(float(feedback.pronunciation or 0), 1),
+        "overall": round(
+            (float(feedback.grammar or 0) + 
+             float(feedback.fluency or 0) + 
+             float(feedback.pronunciation or 0)) / 3, 1
+        )
+    }
+
+
 # --- Issue #40: Advanced Analytics & Daily Stats ---
 
 @router.get("/advanced")
@@ -443,3 +532,112 @@ def get_system_performance_stats(
         "generatedAt": datetime.now().isoformat()
     }
 
+
+# =============================================================================
+# Issue #39: Weekly/Monthly Reports (Learner)
+# =============================================================================
+
+@router.get("/reports/generate")
+def generate_learner_report(
+    period: str = "weekly",  # weekly or monthly
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Issue #39: Generate weekly/monthly performance report for learner.
+    Returns comprehensive summary of progress, errors, and XP.
+    """
+    from app.models.content import SpeakingSession, AIFeedback
+    from app.models.gamification import UserDailyStats
+    
+    # Calculate date range
+    if period == "weekly":
+        days = 7
+    else:
+        days = 30
+    
+    start_date = datetime.now() - timedelta(days=days)
+    
+    # Sessions count
+    sessions = db.query(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id,
+        SpeakingSession.start_time >= start_date
+    ).all()
+    
+    total_sessions = len(sessions)
+    total_minutes = sum(
+        (s.end_time - s.start_time).total_seconds() / 60 
+        for s in sessions if s.end_time and s.start_time
+    )
+    
+    # Average scores from AI feedback
+    feedback = db.query(
+        func.avg(AIFeedback.grammar_score).label("grammar"),
+        func.avg(AIFeedback.fluency_score).label("fluency"),
+        func.avg(AIFeedback.pronunciation_score).label("pronunciation"),
+        func.count(AIFeedback.feedback_id).label("feedback_count")
+    ).join(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id,
+        SpeakingSession.start_time >= start_date
+    ).first()
+    
+    # Words learned from daily stats
+    words_learned = db.query(func.sum(UserDailyStats.words_learned)).filter(
+        UserDailyStats.user_id == current_user.user_id,
+        UserDailyStats.date >= start_date.date()
+    ).scalar() or 0
+    
+    # XP earned
+    xp_earned = db.query(func.sum(UserDailyStats.xp_earned)).filter(
+        UserDailyStats.user_id == current_user.user_id,
+        UserDailyStats.date >= start_date.date()
+    ).scalar() or 0
+    
+    # Calculate streak
+    from app.models.user import User
+    user = db.query(User).filter(User.user_id == current_user.user_id).first()
+    streak = user.streak_count if user else 0
+    
+    return {
+        "period": period,
+        "dateRange": {
+            "start": start_date.strftime("%Y-%m-%d"),
+            "end": datetime.now().strftime("%Y-%m-%d")
+        },
+        "summary": {
+            "totalSessions": total_sessions,
+            "totalMinutes": round(total_minutes, 1),
+            "wordsLearned": words_learned,
+            "xpEarned": xp_earned,
+            "currentStreak": streak
+        },
+        "scores": {
+            "grammar": round(float(feedback.grammar or 0), 1),
+            "fluency": round(float(feedback.fluency or 0), 1),
+            "pronunciation": round(float(feedback.pronunciation or 0), 1),
+            "sessionsScored": feedback.feedback_count or 0
+        },
+        "generatedAt": datetime.now().isoformat()
+    }
+
+@router.post("/reports/send-email")
+def request_report_email(
+    period: str = "weekly",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Issue #39: Request report to be sent via email.
+    Note: Email service integration is a placeholder for school project.
+    """
+    # Generate report data
+    report = generate_learner_report(period, db, current_user)
+    
+    # Placeholder for email sending
+    # In production: integrate with SendGrid/SES/etc.
+    
+    return {
+        "message": f"Report request submitted for {current_user.email}",
+        "period": period,
+        "note": "Email service integration pending (school project placeholder)"
+    }

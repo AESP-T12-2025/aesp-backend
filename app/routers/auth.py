@@ -43,6 +43,14 @@ def login(request: Request, login_data: Login, db: Session = Depends(database.ge
         raise AuthenticationException(
             message="Email hoặc mật khẩu không chính xác"
         )
+    
+    # Issue #26: Check if user account is disabled
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ admin."
+        )
+    
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires

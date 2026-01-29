@@ -30,7 +30,7 @@ from app.routers import (
     upload, auth, content, users, payment, ai, mentor,
     social, gamification, mentor_review, proficiency, vocab,
     support, notification, peer, admin, analytics, policies,
-    images
+    images, learner, vocabulary
 )
 
 # Import all models to register them with SQLAlchemy
@@ -148,6 +148,7 @@ app.include_router(users.router, tags=["Users"])
 # Content routers
 app.include_router(content.router, tags=["Content"])
 app.include_router(vocab.router, tags=["Vocabulary"])
+app.include_router(vocabulary.router, tags=["Vocabulary System"])
 
 # AI routers
 app.include_router(ai.router, tags=["AI Core"])
@@ -179,6 +180,7 @@ app.include_router(notification.router, tags=["Notifications"])
 
 # Analytics routers
 app.include_router(analytics.router, tags=["Analytics"])
+app.include_router(learner.router, tags=["Learner Progress"])
 
 # Utility routers
 app.include_router(upload.router, tags=["Upload"])

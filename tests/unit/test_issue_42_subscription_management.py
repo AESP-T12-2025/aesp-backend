@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 class TestSubscriptionUpgrade:
     """Test subscription upgrade functionality"""
 
-    def test_upgrade_subscription_success(self, client: TestClient, learner_token: str, test_category):
+    def test_upgrade_subscription_success(self, client: TestClient, learner_token: str, test_package):
         """Learner should be able to upgrade to a new package"""
         # First, create a package
         response = client.post(
@@ -34,9 +34,12 @@ class TestSubscriptionUpgrade:
         )
 
         assert response.status_code == 404
-        assert "Package not found" in response.json()["detail"]
+        response_data = response.json()
+        # API returns nested format: {"success": False, "error": {"message": "..."}}
+        error_data = response_data.get("error", {})
+        assert "Package not found" in error_data.get("message", "")
 
-    def test_upgrade_deactivates_old_subscription(self, client: TestClient, learner_token: str, db_session):
+    def test_upgrade_deactivates_old_subscription(self, client: TestClient, learner_token: str, db_session, test_package):
         """Upgrading should deactivate old active subscriptions"""
         from app.models.payment import UserSubscription
         
@@ -72,7 +75,7 @@ class TestSubscriptionUpgrade:
 class TestSubscriptionCancel:
     """Test subscription cancellation functionality"""
 
-    def test_cancel_active_subscription(self, client: TestClient, learner_token: str):
+    def test_cancel_active_subscription(self, client: TestClient, learner_token: str, test_package):
         """Canceling active subscription should succeed"""
         # First upgrade to create active subscription
         client.post(
@@ -168,7 +171,7 @@ class TestSubscriptionEdgeCases:
 
         assert response.status_code == 422
 
-    def test_subscription_dates_are_valid(self, client: TestClient, learner_token: str):
+    def test_subscription_dates_are_valid(self, client: TestClient, learner_token: str, test_package):
         """Upgraded subscription should have valid start and end dates"""
         response = client.post(
             "/payment/upgrade",
