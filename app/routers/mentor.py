@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session, joinedload
 from typing import List
-from datetime import datetime
+from datetime import datetime, timedelta
+from pydantic import BaseModel
 
 from app.core import database, deps
 from app.models.mentor import Mentor, AvailabilitySlot, Booking, BookingStatus
@@ -9,6 +10,10 @@ from app.models.user import User
 from app.schemas.mentor import MentorSchema, MentorResponse, SlotCreate, BookingCreate, MentorCreate
 
 router = APIRouter()
+
+class BookingRequest(BaseModel):
+    date: str
+    time: str
 
 # --- Mentor Profile ---
 
@@ -45,300 +50,7 @@ def get_mentors(skip: int = 0, limit: int = 100, db: Session = Depends(database.
     mentors = db.query(Mentor).offset(skip).limit(limit).all()
     return mentors
 
-
-# --- Issue #30: Mentor Booking System (REQ-MENTOR-5) ---
-
-from pydantic import BaseModel as PydanticBase, validator
-from typing import Optional
-
-class AvailabilitySlotInput(PydanticBase):
-    day: str  # "monday", "tuesday", etc.
-    start_time: str  # "HH:MM"
-    end_time: str    # "HH:MM"
-    
-    @validator('end_time')
-    def end_after_start(cls, v, values):
-        if 'start_time' in values and v <= values['start_time']:
-            raise ValueError('end_time must be after start_time')
-        return v
-
-class AvailabilityCreate(PydanticBase):
-    slots: List[AvailabilitySlotInput]
-
-class BookingRequest(PydanticBase):
-    date: str  # "YYYY-MM-DD"
-    time: str  # "HH:MM"
-
-@router.post("/mentors/availability")
-def set_mentor_availability(
-    data: AvailabilityCreate,
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """
-    REQ-MENTOR-5: Mentor sets availability schedule
-    Replaces existing availability with new slots.
-    """
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(403, "Only mentors can set availability")
-    
-    # Parse day to datetime for each slot
-    from datetime import timedelta
-    day_map = {
-        "monday": 0, "tuesday": 1, "wednesday": 2, 
-        "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6
-    }
-    
-    # Get next occurrence of each day
-    today = datetime.now()
-    current_weekday = today.weekday()
-    
-    created_slots = []
-    for slot in data.slots:
-        day_lower = slot.day.lower()
-        if day_lower not in day_map:
-            raise HTTPException(400, f"Invalid day: {slot.day}")
-        
-        target_weekday = day_map[day_lower]
-        days_ahead = target_weekday - current_weekday
-        if days_ahead <= 0:
-            days_ahead += 7
-        
-        slot_date = today + timedelta(days=days_ahead)
-        
-        # Parse times
-        start_parts = slot.start_time.split(":")
-        end_parts = slot.end_time.split(":")
-        
-        start_dt = slot_date.replace(
-            hour=int(start_parts[0]), 
-            minute=int(start_parts[1]), 
-            second=0, microsecond=0
-        )
-        end_dt = slot_date.replace(
-            hour=int(end_parts[0]), 
-            minute=int(end_parts[1]), 
-            second=0, microsecond=0
-        )
-        
-        new_slot = AvailabilitySlot(
-            mentor_id=mentor.mentor_id,
-            start_time=start_dt,
-            end_time=end_dt,
-            status=BookingStatus.AVAILABLE
-        )
-        db.add(new_slot)
-        created_slots.append(new_slot)
-    
-    db.commit()
-    return {"message": "Availability updated successfully", "slots_created": len(created_slots)}
-
-@router.get("/mentors/availability")
-def get_my_availability(
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """Get mentor's own availability slots"""
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(400, "User is not a mentor")
-    
-    slots = db.query(AvailabilitySlot).filter(
-        AvailabilitySlot.mentor_id == mentor.mentor_id,
-        AvailabilitySlot.status == BookingStatus.AVAILABLE
-    ).all()
-    
-    return {
-        "availability": [
-            {
-                "slot_id": s.slot_id,
-                "start_time": s.start_time.isoformat() if s.start_time else None,
-                "end_time": s.end_time.isoformat() if s.end_time else None,
-                "status": s.status.value if s.status else None
-            }
-            for s in slots
-        ]
-    }
-
-@router.get("/mentors/bookings")
-def get_mentor_bookings(
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """Get all bookings for mentor"""
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(400, "User is not a mentor")
-    
-    bookings = db.query(Booking).join(AvailabilitySlot).filter(
-        AvailabilitySlot.mentor_id == mentor.mentor_id
-    ).options(joinedload(Booking.learner)).all()
-    
-    return {
-        "bookings": [
-            {
-                "booking_id": b.booking_id,
-                "slot_id": b.slot_id,
-                "learner_id": b.learner_id,
-                "learner_name": b.learner.full_name if b.learner else None,
-                "status": b.status,
-                "created_at": b.created_at.isoformat() if b.created_at else None
-            }
-            for b in bookings
-        ]
-    }
-
-@router.post("/mentors/{mentor_id}/book")
-def book_mentor_session(
-    mentor_id: int,
-    booking_data: BookingRequest,
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """REQ-MENTOR-5: Learner books mentor session"""
-    mentor = db.query(Mentor).filter(Mentor.mentor_id == mentor_id).first()
-    if not mentor:
-        raise HTTPException(404, "Mentor not found")
-    
-    # Parse requested date/time
-    from datetime import timedelta
-    try:
-        requested_date = datetime.strptime(booking_data.date, "%Y-%m-%d")
-        time_parts = booking_data.time.split(":")
-        requested_dt = requested_date.replace(
-            hour=int(time_parts[0]),
-            minute=int(time_parts[1])
-        )
-    except ValueError:
-        raise HTTPException(422, "Invalid date/time format")
-    
-    # Find available slot for this mentor at this time
-    slot = db.query(AvailabilitySlot).filter(
-        AvailabilitySlot.mentor_id == mentor_id,
-        AvailabilitySlot.status == BookingStatus.AVAILABLE,
-        AvailabilitySlot.start_time <= requested_dt,
-        AvailabilitySlot.end_time >= requested_dt
-    ).first()
-    
-    if not slot:
-        raise HTTPException(400, "No available slot at requested time")
-    
-    # Atomic update to prevent race condition
-    result = db.query(AvailabilitySlot).filter(
-        AvailabilitySlot.slot_id == slot.slot_id,
-        AvailabilitySlot.status == BookingStatus.AVAILABLE
-    ).update({"status": BookingStatus.BOOKED})
-    
-    if result == 0:
-        raise HTTPException(400, "Slot no longer available")
-    
-    new_booking = Booking(
-        slot_id=slot.slot_id,
-        learner_id=current_user.user_id,
-        status="PENDING"
-    )
-    db.add(new_booking)
-    db.commit()
-    db.refresh(new_booking)
-    
-    return {"message": "Booking created successfully", "booking_id": new_booking.booking_id}
-
-@router.post("/mentors/bookings/{booking_id}/accept")
-def accept_booking(
-    booking_id: int,
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """Mentor accepts pending booking"""
-    booking = db.query(Booking).filter(Booking.booking_id == booking_id).first()
-    if not booking:
-        raise HTTPException(404, "Booking not found")
-    
-    # Verify mentor ownership
-    slot = db.query(AvailabilitySlot).filter(AvailabilitySlot.slot_id == booking.slot_id).first()
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor or slot.mentor_id != mentor.mentor_id:
-        raise HTTPException(403, "Not authorized to manage this booking")
-    
-    booking.status = "CONFIRMED"
-    db.commit()
-    return {"message": "Booking accepted", "booking_id": booking_id}
-
-@router.post("/mentors/bookings/{booking_id}/reject")
-def reject_booking(
-    booking_id: int,
-    reason: Optional[str] = None,
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """Mentor rejects pending booking"""
-    booking = db.query(Booking).filter(Booking.booking_id == booking_id).first()
-    if not booking:
-        raise HTTPException(404, "Booking not found")
-    
-    # Verify mentor ownership
-    slot = db.query(AvailabilitySlot).filter(AvailabilitySlot.slot_id == booking.slot_id).first()
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor or slot.mentor_id != mentor.mentor_id:
-        raise HTTPException(403, "Not authorized to manage this booking")
-    
-    # Release the slot back to available
-    slot.status = BookingStatus.AVAILABLE
-    booking.status = "REJECTED"
-    db.commit()
-    
-    return {"message": "Booking rejected", "booking_id": booking_id}
-
-# --- Learner Bookings ---
-
-@router.get("/learners/bookings")
-def get_learner_bookings(
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """Get learner's own bookings"""
-    bookings = db.query(Booking).filter(
-        Booking.learner_id == current_user.user_id
-    ).options(joinedload(Booking.slot)).all()
-    
-    return {
-        "bookings": [
-            {
-                "booking_id": b.booking_id,
-                "status": b.status,
-                "created_at": b.created_at.isoformat() if b.created_at else None
-            }
-            for b in bookings
-        ]
-    }
-
-@router.post("/learners/bookings/{booking_id}/cancel")
-def cancel_learner_booking(
-    booking_id: int,
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """Learner cancels their own booking"""
-    booking = db.query(Booking).filter(
-        Booking.booking_id == booking_id,
-        Booking.learner_id == current_user.user_id
-    ).first()
-    
-    if not booking:
-        raise HTTPException(404, "Booking not found")
-    
-    # Release the slot
-    slot = db.query(AvailabilitySlot).filter(AvailabilitySlot.slot_id == booking.slot_id).first()
-    if slot:
-        slot.status = BookingStatus.AVAILABLE
-    
-    booking.status = "CANCELLED"
-    db.commit()
-    
-    return {"message": "Booking cancelled"}
-
-
+# --- Booking System ---
 
 @router.post("/bookings/create")
 def create_booking(
@@ -447,150 +159,6 @@ def submit_session_feedback(
     booking.status = "COMPLETED" # Assume enum string or object
     db.commit()
     return {"message": "Feedback submitted"}
-
-
-# =============================================================================
-# Issue #29: Assessment Organization (REQ-MENTOR-2)
-# =============================================================================
-
-class ScheduleAssessmentRequest(PydanticBase):
-    learner_id: int
-    slot_id: int
-    notes: Optional[str] = None
-
-class AssignLevelRequest(PydanticBase):
-    booking_id: int
-    level: str  # A1, A2, B1, B2, C1, C2
-
-@router.get("/mentor-sessions")
-def get_mentor_sessions(
-    status: Optional[str] = None,  # COMPLETED, PENDING, CONFIRMED
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """
-    Issue #29: List all mentor sessions for assessment.
-    Only mentors can view their sessions.
-    """
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(403, "Only mentors can access this endpoint")
-    
-    query = db.query(Booking).filter(Booking.mentor_id == mentor.mentor_id)
-    
-    if status:
-        query = query.filter(Booking.status == status)
-    
-    bookings = query.options(
-        joinedload(Booking.learner),
-        joinedload(Booking.slot)
-    ).order_by(Booking.booking_id.desc()).all()
-    
-    result = []
-    for b in bookings:
-        result.append({
-            "booking_id": b.booking_id,
-            "learner_id": b.learner_id,
-            "learner_name": b.learner.full_name if b.learner else "Unknown",
-            "status": b.status,
-            "scheduled_time": b.slot.start_time.isoformat() if b.slot and b.slot.start_time else None,
-            "has_assessment": False  # Will be updated below
-        })
-    
-    return result
-
-@router.post("/mentor-sessions/schedule")
-def schedule_assessment_session(
-    data: ScheduleAssessmentRequest,
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """
-    Issue #29: Schedule an assessment session for a learner.
-    Mentor creates a new booking specifically for assessment.
-    """
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(403, "Only mentors can schedule assessments")
-    
-    # Verify slot belongs to this mentor
-    slot = db.query(AvailabilitySlot).filter(
-        AvailabilitySlot.slot_id == data.slot_id,
-        AvailabilitySlot.mentor_id == mentor.mentor_id
-    ).first()
-    if not slot:
-        raise HTTPException(404, "Slot not found or doesn't belong to you")
-    
-    # Create assessment booking
-    booking = Booking(
-        mentor_id=mentor.mentor_id,
-        learner_id=data.learner_id,
-        slot_id=data.slot_id,
-        status="CONFIRMED"  # Auto-confirm for mentor-initiated
-    )
-    db.add(booking)
-    
-    # Mark slot as booked
-    slot.status = "BOOKED"
-    
-    db.commit()
-    
-    return {
-        "message": "Assessment session scheduled",
-        "booking_id": booking.booking_id
-    }
-
-@router.post("/mentor-sessions/assign-level")
-def assign_proficiency_level(
-    data: AssignLevelRequest,
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """
-    Issue #29: Assign proficiency level (A1-C2) to learner after assessment.
-    Updates learner's LearningPath.
-    """
-    from app.models.proficiency import LearningPath
-    
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(403, "Only mentors can assign levels")
-    
-    # Validate level
-    valid_levels = ["A1", "A2", "B1", "B2", "C1", "C2"]
-    if data.level not in valid_levels:
-        raise HTTPException(400, f"Invalid level. Must be one of: {valid_levels}")
-    
-    # Get booking and verify it belongs to this mentor
-    booking = db.query(Booking).filter(
-        Booking.booking_id == data.booking_id,
-        Booking.mentor_id == mentor.mentor_id
-    ).first()
-    if not booking:
-        raise HTTPException(404, "Booking not found or doesn't belong to you")
-    
-    # Update or create learner's learning path
-    path = db.query(LearningPath).filter(LearningPath.user_id == booking.learner_id).first()
-    if path:
-        path.current_level = data.level
-    else:
-        path = LearningPath(
-            user_id=booking.learner_id,
-            current_level=data.level,
-            target_level="C2"  # Default target
-        )
-        db.add(path)
-    
-    # Mark booking as completed
-    booking.status = "COMPLETED"
-    
-    db.commit()
-    
-    return {
-        "message": f"Level {data.level} assigned to learner",
-        "learner_id": booking.learner_id,
-        "level": data.level
-    }
 
 # --- Mentor Assessments for Learners ---
 from pydantic import BaseModel as PydanticBase
@@ -739,126 +307,274 @@ def get_topic_vocab_suggestions(
     return db.query(MentorVocabSuggestion).filter(MentorVocabSuggestion.topic_id == topic_id).all()
 
 
-# --- Issue #37: Mentor Resources/Documents ---
+# =============================================================================
+# Issue #29: Mentor Sessions (for assessment organization)
+# =============================================================================
 
-from app.models.mentor_review import MentorResource
+class ScheduleAssessmentRequest(BaseModel):
+    learner_id: int
+    date: str
+    type: str = "speaking_assessment"
 
-class ResourceCreate(PydanticBase):
-    title: str
-    description: Optional[str] = None
-    resource_type: str  # "document", "video", "link"
-    file_url: str  # Pre-uploaded to Cloudinary or external URL
-    is_public: bool = False
 
-class ResourceUpdate(PydanticBase):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    is_public: Optional[bool] = None
-
-class ResourceResponse(PydanticBase):
-    resource_id: int
-    mentor_id: int
-    title: str
-    description: Optional[str]
-    resource_type: str
-    file_url: str
-    is_public: bool
-    created_at: datetime
+@router.get("/mentor-sessions")
+def get_mentor_sessions(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user),
+    status: str = None
+):
+    """
+    Issue #29: Get mentor's sessions for assessment organization.
+    Returns list of bookings/sessions for the authenticated mentor.
+    """
+    from app.models.user import UserRole
     
-    class Config:
-        from_attributes = True
+    # Check if user is a mentor
+    user_role = str(current_user.role).upper() if current_user.role else ""
+    if "MENTOR" not in user_role:
+        raise HTTPException(403, "Only mentors can access this endpoint")
+    
+    # Get mentor profile
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    
+    if not mentor:
+        # Return empty list if no mentor profile
+        return {"sessions": []}
+    
+    # Get all bookings for this mentor via slots (Booking has no mentor_id directly)
+    query = db.query(Booking).join(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id
+    ).options(
+        joinedload(Booking.learner),
+        joinedload(Booking.slot)
+    )
+    
+    # Filter by status if provided
+    if status:
+        query = query.filter(Booking.status == status)
+    
+    bookings = query.all()
+    
+    sessions = []
+    for b in bookings:
+        sessions.append({
+            "id": b.booking_id,
+            "session_id": b.booking_id,
+            "booking_id": b.booking_id,
+            "learner": {
+                "id": b.learner.user_id if b.learner else None,
+                "name": b.learner.full_name if b.learner else None,
+                "email": b.learner.email if b.learner else None
+            } if b.learner else None,
+            "date": b.slot.start_time.isoformat() if b.slot and b.slot.start_time else None,
+            "status": b.status.value if hasattr(b.status, 'value') else str(b.status),
+            "created_at": b.created_at.isoformat() if hasattr(b, 'created_at') and b.created_at else None
+        })
+    
+    return {"sessions": sessions}
 
-@router.post("/mentor/resources", response_model=ResourceResponse)
-def create_mentor_resource(
-    data: ResourceCreate,
+
+@router.post("/mentor-sessions/schedule")
+def schedule_assessment(
+    data: ScheduleAssessmentRequest,
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
     """
-    Issue #37: Create mentor resource (document/video/link)
-    Resource types: 'document', 'video', 'link'
+    Issue #29: Schedule assessment session for a learner.
     """
+    from app.models.user import UserRole
+    
+    # Check if user is a mentor
+    user_role = str(current_user.role).upper() if current_user.role else ""
+    if "MENTOR" not in user_role:
+        raise HTTPException(403, "Only mentors can schedule assessments")
+    
+    # Get or create mentor profile
     mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
     if not mentor:
-        raise HTTPException(400, "User is not a mentor")
+        mentor = Mentor(
+            user_id=current_user.user_id,
+            full_name=current_user.full_name or "Mentor",
+            verification_status="PENDING"
+        )
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
+    
+    # Parse date
+    from datetime import datetime
+    try:
+        session_date = datetime.fromisoformat(data.date.replace("Z", "+00:00"))
+    except:
+        raise HTTPException(422, "Invalid date format")
+    
+    # Create availability slot
+    slot = AvailabilitySlot(
+        mentor_id=mentor.mentor_id,
+        start_time=session_date,
+        end_time=session_date + timedelta(hours=1),
+        status=BookingStatus.BOOKED
+    )
+    db.add(slot)
+    db.commit()
+    db.refresh(slot)
+    
+    # Create booking
+    booking = Booking(
+        slot_id=slot.slot_id,
+        learner_id=data.learner_id,
+        status="SCHEDULED"
+    )
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+    
+    return {
+        "message": "Assessment scheduled successfully",
+        "session_id": booking.booking_id,
+        "date": session_date.isoformat(),
+        "type": data.type
+    }
+
+
+
+# =============================================================================
+# Issue #37: Mentor Resources (Documents/Videos/Links)
+# =============================================================================
+
+from app.models.mentor_review import MentorResource
+
+class MentorResourceCreate(PydanticBase):
+    title: str
+    description: Optional[str] = None
+    resource_type: str = "document"  # document, video, link
+    file_url: str
+    is_public: bool = False
+
+
+class MentorResourceUpdate(PydanticBase):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    is_public: Optional[bool] = None
+
+
+@router.get("/mentor/resources")
+def list_mentor_resources(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #37: List mentor's resources."""
+    resources = db.query(MentorResource).filter(
+        MentorResource.mentor_id == current_user.user_id
+    ).all()
+    
+    return [
+        {
+            "id": r.resource_id,
+            "resource_id": r.resource_id,
+            "title": r.title,
+            "description": r.description,
+            "resource_type": r.resource_type,
+            "file_url": r.file_url,
+            "is_public": r.is_public if hasattr(r, 'is_public') else False,
+            "created_at": r.created_at.isoformat() if hasattr(r, 'created_at') and r.created_at else None
+        }
+        for r in resources
+    ]
+
+
+@router.post("/mentor/resources")
+def create_mentor_resource(
+    data: MentorResourceCreate,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #37: Create a new mentor resource."""
+    # Verify user has mentor role
+    user_role = str(current_user.role).upper() if current_user.role else ""
+    if "MENTOR" not in user_role:
+        raise HTTPException(403, "Only mentors can create resources")
     
     # Validate resource type
-    valid_types = ["document", "video", "link"]
-    if data.resource_type.lower() not in valid_types:
-        raise HTTPException(400, f"Invalid resource_type. Must be one of: {valid_types}")
+    allowed_types = ["document", "video", "link"]
+    if data.resource_type not in allowed_types:
+        raise HTTPException(400, f"Invalid resource type. Allowed types: {', '.join(allowed_types)}")
     
     resource = MentorResource(
-        mentor_id=current_user.user_id,  # FK to users.user_id
+        mentor_id=current_user.user_id,
         title=data.title,
         description=data.description,
-        resource_type=data.resource_type.lower(),
+        resource_type=data.resource_type,
         file_url=data.file_url,
         is_public=data.is_public
     )
     db.add(resource)
     db.commit()
     db.refresh(resource)
-    return resource
-
-@router.get("/mentor/resources", response_model=List[ResourceResponse])
-def get_mentor_resources(
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
-):
-    """
-    Issue #37: Get mentor's resource library
-    Returns all resources created by the mentor.
-    """
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(400, "User is not a mentor")
     
-    return db.query(MentorResource).filter(
-        MentorResource.mentor_id == current_user.user_id
-    ).order_by(MentorResource.created_at.desc()).all()
+    return {
+        "id": resource.resource_id,
+        "resource_id": resource.resource_id,
+        "title": resource.title,
+        "description": resource.description,
+        "resource_type": resource.resource_type,
+        "file_url": resource.file_url,
+        "is_public": resource.is_public if hasattr(resource, 'is_public') else False,
+        "message": "Resource created successfully"
+    }
 
-@router.get("/mentor/resources/{resource_id}", response_model=ResourceResponse)
-def get_mentor_resource_detail(
+
+@router.get("/mentor/resources/{resource_id}")
+def get_mentor_resource(
     resource_id: int,
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    """Get single resource detail"""
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(400, "User is not a mentor")
-    
+    """Issue #37: Get a specific mentor resource."""
     resource = db.query(MentorResource).filter(
-        MentorResource.resource_id == resource_id,
-        MentorResource.mentor_id == current_user.user_id
+        MentorResource.resource_id == resource_id
     ).first()
     
     if not resource:
         raise HTTPException(404, "Resource not found")
     
-    return resource
+    # Check ownership or public status
+    is_owner = resource.mentor_id == current_user.user_id
+    is_public = getattr(resource, 'is_public', False)
+    
+    if not is_owner and not is_public:
+        raise HTTPException(403, "Access denied")
+    
+    return {
+        "id": resource.resource_id,
+        "resource_id": resource.resource_id,
+        "title": resource.title,
+        "description": resource.description,
+        "resource_type": resource.resource_type,
+        "file_url": resource.file_url,
+        "is_public": is_public,
+        "mentor_id": resource.mentor_id
+    }
 
-@router.put("/mentor/resources/{resource_id}", response_model=ResourceResponse)
+
+@router.put("/mentor/resources/{resource_id}")
 def update_mentor_resource(
     resource_id: int,
-    data: ResourceUpdate,
+    data: MentorResourceUpdate,
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    """Update mentor resource"""
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(400, "User is not a mentor")
-    
+    """Issue #37: Update a mentor resource."""
     resource = db.query(MentorResource).filter(
         MentorResource.resource_id == resource_id,
         MentorResource.mentor_id == current_user.user_id
     ).first()
     
     if not resource:
-        raise HTTPException(404, "Resource not found")
+        raise HTTPException(404, "Resource not found or access denied")
     
-    if data.title:
+    if data.title is not None:
         resource.title = data.title
     if data.description is not None:
         resource.description = data.description
@@ -867,7 +583,16 @@ def update_mentor_resource(
     
     db.commit()
     db.refresh(resource)
-    return resource
+    
+    return {
+        "id": resource.resource_id,
+        "title": resource.title,
+        "description": resource.description,
+        "resource_type": resource.resource_type,
+        "is_public": resource.is_public if hasattr(resource, 'is_public') else False,
+        "message": "Resource updated successfully"
+    }
+
 
 @router.delete("/mentor/resources/{resource_id}")
 def delete_mentor_resource(
@@ -875,37 +600,480 @@ def delete_mentor_resource(
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    """Delete mentor resource"""
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-        raise HTTPException(400, "User is not a mentor")
-    
+    """Issue #37: Delete a mentor resource."""
     resource = db.query(MentorResource).filter(
         MentorResource.resource_id == resource_id,
         MentorResource.mentor_id == current_user.user_id
     ).first()
     
     if not resource:
-        raise HTTPException(404, "Resource not found")
+        raise HTTPException(404, "Resource not found or access denied")
     
     db.delete(resource)
     db.commit()
+    
     return {"message": "Resource deleted successfully"}
 
-@router.get("/resources/public", response_model=List[ResourceResponse])
+
+@router.get("/resources")
 def get_public_resources(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #37: Get all public resources (for learners)."""
+    resources = db.query(MentorResource).filter(
+        MentorResource.is_public == True
+    ).all()
+    
+    return [
+        {
+            "id": r.resource_id,
+            "title": r.title,
+            "description": r.description,
+            "resource_type": r.resource_type,
+            "file_url": r.file_url,
+            "mentor_id": r.mentor_id
+        }
+        for r in resources
+    ]
+
+
+# =============================================================================
+# Issue #36: Mentor Vocabulary Suggestions (alternate path)
+# =============================================================================
+
+class VocabSuggestRequest(PydanticBase):
+    word: Optional[str] = None
+    vocabulary: Optional[str] = None
+    topic_id: Optional[int] = None
+    collocations: Optional[str] = None
+    idioms: Optional[str] = None
+    tips: Optional[str] = None
+
+
+@router.post("/mentor/vocabulary/suggest")
+def suggest_vocabulary(
+    data: VocabSuggestRequest,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #36: Mentor suggests vocabulary to learner."""
+    # Check if user is a mentor
+    user_role = str(current_user.role).upper() if current_user.role else ""
+    if "MENTOR" not in user_role:
+        raise HTTPException(403, "Only mentors can suggest vocabulary")
+    
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        # Auto-create mentor profile
+        mentor = Mentor(
+            user_id=current_user.user_id,
+            full_name=current_user.full_name or "Mentor",
+            verification_status="PENDING"
+        )
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
+    
+    vocab_word = data.word or data.vocabulary or "Unknown"
+    suggestion = MentorVocabSuggestion(
+        mentor_id=mentor.mentor_id,
+        topic_id=data.topic_id,
+        vocabulary=vocab_word,
+        collocations=data.collocations,
+        idioms=data.idioms,
+        tips=data.tips
+    )
+    db.add(suggestion)
+    db.commit()
+    db.refresh(suggestion)
+    
+    return {
+        "id": suggestion.id,
+        "vocabulary": suggestion.vocabulary,
+        "message": "Vocabulary suggested successfully"
+    }
+
+
+# =============================================================================
+# Issue #37: Public Resources Endpoint  
+# =============================================================================
+
+@router.get("/resources/public")
+def get_all_public_resources(
     resource_type: Optional[str] = None,
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    """
-    Get all public resources shared by mentors.
-    Learners can access this to find learning materials.
-    """
+    """Issue #37: Get all public resources available to learners."""
     query = db.query(MentorResource).filter(MentorResource.is_public == True)
     
     if resource_type:
-        query = query.filter(MentorResource.resource_type == resource_type.lower())
+        query = query.filter(MentorResource.resource_type == resource_type)
     
-    return query.order_by(MentorResource.created_at.desc()).all()
+    resources = query.all()
+    
+    return [
+        {
+            "id": r.resource_id,
+            "resource_id": r.resource_id,
+            "title": r.title,
+            "description": r.description,
+            "resource_type": r.resource_type,
+            "file_url": r.file_url,
+            "mentor_id": r.mentor_id,
+            "is_public": r.is_public
+        }
+        for r in resources
+    ]
 
+
+# =============================================================================
+# Issue #30: Booking System Endpoints
+# =============================================================================
+
+class SlotInput(PydanticBase):
+    day: Optional[str] = None
+    start_time: str
+    end_time: str
+    date: Optional[str] = None
+
+
+class AvailabilityInput(PydanticBase):
+    slots: List[SlotInput]
+
+
+@router.post("/mentors/availability")
+def set_mentor_availability(
+    data: AvailabilityInput,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #30: Mentor sets availability slots."""
+    user_role = str(current_user.role).upper() if current_user.role else ""
+    if "MENTOR" not in user_role:
+        raise HTTPException(403, "Only mentors can set availability")
+    
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        mentor = Mentor(
+            user_id=current_user.user_id,
+            full_name=current_user.full_name or "Mentor",
+            verification_status="PENDING"
+        )
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
+    
+    slots_created = 0
+    for slot_data in data.slots:
+        # Parse times
+        from datetime import datetime
+        base_date = datetime.now() + timedelta(days=1)
+        start_str = slot_data.start_time
+        end_str = slot_data.end_time
+        
+        try:
+            start_time = datetime.strptime(f"{base_date.date()} {start_str}", "%Y-%m-%d %H:%M")
+            end_time = datetime.strptime(f"{base_date.date()} {end_str}", "%Y-%m-%d %H:%M")
+            
+            # Validate time order
+            if end_time <= start_time:
+                raise HTTPException(422, "End time must be after start time")
+        except HTTPException:
+            raise
+        except:
+            continue
+        
+        slot = AvailabilitySlot(
+            mentor_id=mentor.mentor_id,
+            start_time=start_time,
+            end_time=end_time,
+            status=BookingStatus.AVAILABLE
+        )
+        db.add(slot)
+        slots_created += 1
+    
+    db.commit()
+    return {"message": "Availability set successfully", "slots_created": slots_created}
+
+
+@router.get("/mentors/availability")
+def get_mentor_availability(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #30: Get mentor's availability slots."""
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        return {"availability": []}
+    
+    slots = db.query(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id
+    ).all()
+    
+    return {
+        "availability": [
+            {
+                "id": s.slot_id,
+                "start_time": s.start_time.isoformat() if s.start_time else None,
+                "end_time": s.end_time.isoformat() if s.end_time else None,
+                "status": s.status.value if hasattr(s.status, 'value') else str(s.status)
+            }
+            for s in slots
+        ]
+    }
+
+
+@router.get("/mentors/bookings")
+def get_mentor_bookings(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #30: Get mentor's bookings."""
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        return {"bookings": []}
+    
+    # Get bookings via slots (Booking doesn't have mentor_id directly)
+    bookings = db.query(Booking).join(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id
+    ).options(
+        joinedload(Booking.learner),
+        joinedload(Booking.slot)
+    ).all()
+    
+    return {
+        "bookings": [
+            {
+                "booking_id": b.booking_id,
+                "learner_id": b.learner_id,
+                "learner_name": b.learner.full_name if b.learner else None,
+                "start_time": b.slot.start_time.isoformat() if b.slot and b.slot.start_time else None,
+                "end_time": b.slot.end_time.isoformat() if b.slot and b.slot.end_time else None,
+                "status": b.status.value if hasattr(b.status, 'value') else str(b.status)
+            }
+            for b in bookings
+        ]
+    }
+
+
+@router.post("/mentors/{mentor_id}/book")
+def book_mentor(
+    mentor_id: int,
+    booking: BookingRequest,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #30: Learner books a mentor's slot."""
+    from datetime import datetime
+    
+    # Check if mentor exists
+    mentor = db.query(Mentor).filter(Mentor.mentor_id == mentor_id).first()
+    if not mentor:
+        raise HTTPException(404, "Mentor not found")
+    
+    # Find slot by mentor_id and time
+    try:
+        requested_datetime = datetime.strptime(f"{booking.date} {booking.time}", "%Y-%m-%d %H:%M")
+    except:
+        raise HTTPException(422, "Invalid date or time format")
+    
+    slot = db.query(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor_id,
+        AvailabilitySlot.start_time == requested_datetime
+    ).first()
+    
+    if not slot or slot.status != BookingStatus.AVAILABLE:
+        raise HTTPException(400, "Slot is not available")
+    
+    booking_obj = Booking(
+        slot_id=slot.slot_id,
+        learner_id=current_user.user_id,
+        status="CONFIRMED"
+    )
+    slot.status = BookingStatus.BOOKED
+    
+    db.add(booking_obj)
+    db.commit()
+    db.refresh(booking_obj)
+    
+    return {"message": "Booking created", "booking_id": booking_obj.booking_id}
+
+
+@router.post("/bookings")
+def create_booking(
+    slot_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #30: Learner books an available slot."""
+    slot = db.query(AvailabilitySlot).filter(AvailabilitySlot.slot_id == slot_id).first()
+    if not slot:
+        raise HTTPException(404, "Slot not found")
+    
+    if slot.status != BookingStatus.AVAILABLE:
+        raise HTTPException(400, "Slot is not available")
+    
+    booking = Booking(
+        slot_id=slot.slot_id,
+        learner_id=current_user.user_id,
+        status="CONFIRMED"
+    )
+    slot.status = BookingStatus.BOOKED
+    
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+    
+    return {"message": "Booking created", "booking_id": booking.booking_id}
+
+
+@router.post("/mentors/bookings/{booking_id}/accept")
+def accept_booking(
+    booking_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #30: Mentor accepts a booking."""
+    booking = db.query(Booking).filter(Booking.booking_id == booking_id).first()
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    
+    booking.status = "CONFIRMED"
+    db.commit()
+    return {"message": "Booking accepted", "status": "CONFIRMED"}
+
+
+@router.post("/mentors/bookings/{booking_id}/reject")
+def reject_booking(
+    booking_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #30: Mentor rejects a booking."""
+    booking = db.query(Booking).filter(Booking.booking_id == booking_id).first()
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    
+    booking.status = "REJECTED"
+    if booking.slot:
+        booking.slot.status = BookingStatus.AVAILABLE
+    db.commit()
+    return {"message": "Booking rejected", "status": "REJECTED"}
+
+
+@router.get("/learners/bookings")
+def get_learner_bookings(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #30: Get learner's bookings."""
+    bookings = db.query(Booking).filter(
+        Booking.learner_id == current_user.user_id
+    ).options(
+        joinedload(Booking.slot).joinedload(AvailabilitySlot.mentor)
+    ).all()
+    
+    return {
+        "bookings": [
+            {
+                "id": b.booking_id,
+                "mentor_id": b.slot.mentor.mentor_id if b.slot and b.slot.mentor else None,
+                "start_time": b.slot.start_time.isoformat() if b.slot and b.slot.start_time else None,
+                "status": b.status.value if hasattr(b.status, 'value') else str(b.status)
+            }
+            for b in bookings
+        ]
+    }
+
+
+@router.post("/learners/bookings/{booking_id}/cancel")
+def cancel_learner_booking(
+    booking_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #30: Learner cancels their booking."""
+    booking = db.query(Booking).filter(
+        Booking.booking_id == booking_id,
+        Booking.learner_id == current_user.user_id
+    ).first()
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    
+    booking.status = "CANCELLED"
+    if booking.slot:
+        booking.slot.status = BookingStatus.AVAILABLE
+    db.commit()
+    
+    return {"message": "Booking cancelled"}
+
+
+# =============================================================================
+# Issue #29: Schedule Assessment Endpoints
+# =============================================================================
+
+class ScheduleAssessmentRequest(PydanticBase):
+    learner_id: int
+    scheduled_time: str
+    assessment_type: Optional[str] = "speaking"
+    notes: Optional[str] = None
+
+
+@router.post("/mentor/assessments/schedule")
+def schedule_assessment(
+    data: ScheduleAssessmentRequest,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Issue #29: Mentor schedules assessment for learner."""
+    user_role = str(current_user.role).upper() if current_user.role else ""
+    if "MENTOR" not in user_role:
+        raise HTTPException(403, "Only mentors can schedule assessments")
+    
+    # Create a booking/session for assessment
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        mentor = Mentor(
+            user_id=current_user.user_id,
+            full_name=current_user.full_name or "Mentor",
+            verification_status="PENDING"
+        )
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
+    
+    # Create availability slot for assessment
+    try:
+        from datetime import datetime
+        scheduled = datetime.fromisoformat(data.scheduled_time.replace("Z", "+00:00"))
+    except:
+        scheduled = datetime.now() + timedelta(days=1)
+    
+    slot = AvailabilitySlot(
+        mentor_id=mentor.mentor_id,
+        start_time=scheduled,
+        end_time=scheduled + timedelta(hours=1),
+        status=BookingStatus.BOOKED
+    )
+    db.add(slot)
+    db.commit()
+    db.refresh(slot)
+    
+    booking = Booking(
+        slot_id=slot.slot_id,
+        mentor_id=mentor.mentor_id,
+        learner_id=data.learner_id,
+        status=BookingStatus.CONFIRMED,
+        notes=data.notes
+    )
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+    
+    return {
+        "message": "Assessment scheduled",
+        "assessment_id": booking.booking_id,
+        "scheduled_time": scheduled.isoformat()
+    }

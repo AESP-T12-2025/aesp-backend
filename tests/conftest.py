@@ -112,12 +112,30 @@ def admin_user(create_test_user) -> User:
 
 
 @pytest.fixture
-def mentor_user(create_test_user) -> User:
-    """Create mentor user"""
-    return create_test_user(
+def mentor_user(create_test_user, db: Session) -> User:
+    """Create mentor user with Mentor profile"""
+    from app.models.mentor import Mentor
+    
+    user = create_test_user(
         email="mentor@test.com",
         role=UserRole.MENTOR
     )
+    
+    # Check if Mentor profile already exists for this user
+    existing_mentor = db.query(Mentor).filter(Mentor.user_id == user.user_id).first()
+    if not existing_mentor:
+        # Create Mentor profile for this user
+        mentor = Mentor(
+            user_id=user.user_id,
+            full_name=user.full_name or "Test Mentor",
+            bio="Test mentor bio",
+            verification_status="PENDING"
+        )
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
+    
+    return user
 
 
 @pytest.fixture
@@ -303,6 +321,30 @@ def mentor_token(client: TestClient, mentor_user: User) -> str:
 
 
 # ========== Content Fixtures ==========
+
+@pytest.fixture
+def test_package(db: Session):
+    """Create a test service package for subscription tests"""
+    from app.models.payment import ServicePackage
+    
+    # Check if already exists
+    existing = db.query(ServicePackage).filter(ServicePackage.id == 1).first()
+    if existing:
+        return existing
+    
+    package = ServicePackage(
+        id=1,
+        name="Basic Plan",
+        description="Basic subscription plan",
+        price=9.99,
+        duration_days=30,
+        is_active=True
+    )
+    db.add(package)
+    db.commit()
+    db.refresh(package)
+    return package
+
 
 @pytest.fixture
 def test_category(db: Session):
