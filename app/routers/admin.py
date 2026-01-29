@@ -12,6 +12,7 @@ from app.models.policy import SystemPolicy
 from app.models.content import SpeakingSession, Topic, Scenario
 from app.models.mentor import Mentor, Booking, AvailabilitySlot
 from app.models.social import MentorPost, PostComment
+from app.services.export_service import export_service
 
 router = APIRouter(prefix="/admin", tags=["Admin Dashboard"])
 
@@ -625,14 +626,14 @@ def get_purchases(
 
 
 @router.get("/purchases/export")
-def export_purchases(
+async def export_purchases(
     format: str = "csv",
     start_date: str = None,
     end_date: str = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Issue #38: Export purchase history."""
+    """Issue #38 + #44: Export purchase history as Excel/CSV."""
     require_admin(current_user)
     
     if format not in ["csv", "json", "xlsx", "excel"]:
@@ -650,16 +651,82 @@ def export_purchases(
     
     items = query.order_by(Transaction.created_at.desc()).all()
     
-    data = [
+    # Format data for export
+    transactions_data = [
         {
-            "id": t.id,
-            "user_email": t.user.email if t.user else None,
-            "amount": float(t.amount),
-            "status": t.status.value if hasattr(t.status, 'value') else t.status,
-            "date": t.created_at.isoformat() if t.created_at else None
+            "ID": t.id,
+            "User": t.user.email if t.user else None,
+            "Package": t.package.name if t.package else None,
+            "Amount": float(t.amount),
+            "Status": t.status.value if hasattr(t.status, 'value') else str(t.status),
+            "Date": t.created_at.isoformat() if t.created_at else None
         }
         for t in items
     ]
     
-    return {"format": format, "count": len(data), "data": data}
+    # Use export service for Excel format
+    if format in ["xlsx", "excel"]:
+        from datetime import datetime as dt
+        start_dt = dt.fromisoformat(start_date) if start_date else None
+        end_dt = dt.fromisoformat(end_date) if end_date else None
+        
+        result = await export_service.export_transactions_excel(
+            transactions=transactions_data,
+            start_date=start_dt,
+            end_date=end_dt
+        )
+        return result.to_dict()
+    
+    # Return JSON for other formats
+    return {"format": format, "count": len(transactions_data), "data": transactions_data}
+
+
+@router.get("/analytics/export")
+async def export_analytics(
+    format: str = "excel",
+    start_date: str = None,
+    end_date: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Issue #44: Export analytics data as Excel."""
+    require_admin(current_user)
+    
+    # Get analytics data
+    from datetime import datetime as dt
+    
+    start_dt = dt.fromisoformat(start_date) if start_date else None
+    end_dt = dt.fromisoformat(end_date) if end_date else None
+    
+    # User stats
+    total_users = db.query(User).count()
+    learners = db.query(User).filter(User.role == UserRole.LEARNER).count()
+    mentors = db.query(User).filter(User.role == UserRole.MENTOR).count()
+    
+    # Revenue
+    total_revenue = db.query(func.sum(Transaction.amount)).scalar() or 0
+    
+    # Sessions
+    total_sessions = db.query(SpeakingSession).count()
+    
+    analytics_data = {
+        "headers": ["Metric", "Value"],
+        "rows": [
+            {"Metric": "Total Users", "Value": total_users},
+            {"Metric": "Learners", "Value": learners},
+            {"Metric": "Mentors", "Value": mentors},
+            {"Metric": "Total Revenue", "Value": float(total_revenue)},
+            {"Metric": "Total Sessions", "Value": total_sessions},
+        ]
+    }
+    
+    result = await export_service.export_analytics_excel(
+        data=analytics_data,
+        export_type="analytics",
+        start_date=start_dt,
+        end_date=end_dt
+    )
+    
+    return result.to_dict()
+
 
