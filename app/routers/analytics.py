@@ -224,3 +224,222 @@ def get_monthly_stats(
             "diff": hours_diff
         }
     }
+
+
+# --- Issue #40: Advanced Analytics & Daily Stats ---
+
+@router.get("/advanced")
+def get_advanced_analytics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Issue #40: Advanced Analytics
+    - Time of day analysis (when user practices most)
+    - Retention rate (this week vs last week)
+    - Learning patterns
+    """
+    from app.models.content import SpeakingSession
+    
+    today = datetime.now().date()
+    
+    # 1. Time of Day Analysis
+    sessions = db.query(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id
+    ).all()
+    
+    hour_distribution = [0] * 24
+    for s in sessions:
+        if s.start_time:
+            hour_distribution[s.start_time.hour] += 1
+    
+    # Find peak hours (top 3)
+    peak_hours = []
+    if any(hour_distribution):
+        sorted_hours = sorted(range(24), key=lambda h: hour_distribution[h], reverse=True)
+        peak_hours = [{"hour": h, "sessions": hour_distribution[h]} for h in sorted_hours[:3] if hour_distribution[h] > 0]
+    
+    # Determine practice time category
+    morning = sum(hour_distribution[6:12])
+    afternoon = sum(hour_distribution[12:18])
+    evening = sum(hour_distribution[18:24])
+    night = sum(hour_distribution[0:6])
+    
+    time_preference = "morning" if morning >= max(afternoon, evening, night) else \
+                     "afternoon" if afternoon >= max(evening, night) else \
+                     "evening" if evening >= night else "night"
+    
+    # 2. Retention Rate (this week vs last week)
+    this_week_start = today - timedelta(days=today.weekday())
+    last_week_start = this_week_start - timedelta(days=7)
+    
+    this_week_count = db.query(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id,
+        SpeakingSession.start_time >= this_week_start
+    ).count()
+    
+    last_week_count = db.query(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id,
+        SpeakingSession.start_time >= last_week_start,
+        SpeakingSession.start_time < this_week_start
+    ).count()
+    
+    if last_week_count > 0:
+        retention_rate = round((this_week_count / last_week_count) * 100, 1)
+    else:
+        retention_rate = 100.0 if this_week_count > 0 else 0.0
+    
+    # 3. Weekly learning trend
+    weekly_trend = []
+    for i in range(4):  # Last 4 weeks
+        week_start = this_week_start - timedelta(days=7 * i)
+        week_end = week_start + timedelta(days=6)
+        count = db.query(SpeakingSession).filter(
+            SpeakingSession.user_id == current_user.user_id,
+            SpeakingSession.start_time >= week_start,
+            SpeakingSession.start_time <= week_end
+        ).count()
+        weekly_trend.append({
+            "week_start": week_start.isoformat(),
+            "sessions": count
+        })
+    
+    weekly_trend.reverse()  # Chronological order
+    
+    return {
+        "timeOfDay": {
+            "distribution": hour_distribution,
+            "peakHours": peak_hours,
+            "preference": time_preference
+        },
+        "retention": {
+            "thisWeek": this_week_count,
+            "lastWeek": last_week_count,
+            "ratePercent": retention_rate,
+            "trend": "improving" if retention_rate > 100 else "declining" if retention_rate < 100 else "stable"
+        },
+        "weeklyTrend": weekly_trend
+    }
+
+@router.get("/daily-stats")
+def get_daily_aggregated_stats(
+    date: str = None,  # YYYY-MM-DD
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Issue #40: Daily stats aggregation
+    Returns detailed stats for a specific day for chart visualization.
+    """
+    # Parse date or use today
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            target_date = datetime.now().date()
+    else:
+        target_date = datetime.now().date()
+    
+    # Get stats for specific day
+    stat = db.query(UserDailyStats).filter(
+        UserDailyStats.user_id == current_user.user_id,
+        func.date(UserDailyStats.date) == target_date
+    ).first()
+    
+    # Get sessions for this day
+    from app.models.content import SpeakingSession, AIFeedback
+    
+    sessions = db.query(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id,
+        func.date(SpeakingSession.start_time) == target_date
+    ).all()
+    
+    # Calculate average scores
+    feedback_scores = db.query(
+        func.avg(AIFeedback.grammar_score).label("grammar"),
+        func.avg(AIFeedback.pronunciation_score).label("pronunciation"),
+        func.avg(AIFeedback.fluency_score).label("fluency")
+    ).join(SpeakingSession).filter(
+        SpeakingSession.user_id == current_user.user_id,
+        func.date(SpeakingSession.start_time) == target_date
+    ).first()
+    
+    if not stat:
+        return {
+            "date": target_date.isoformat(),
+            "speakingMinutes": 0,
+            "wordsLearned": 0,
+            "sessionsCount": len(sessions),
+            "scores": {
+                "grammar": 0,
+                "pronunciation": 0,
+                "fluency": 0
+            }
+        }
+    
+    return {
+        "date": target_date.isoformat(),
+        "speakingMinutes": round((stat.speaking_duration_seconds or 0) / 60, 1),
+        "wordsLearned": stat.words_learned or 0,
+        "sessionsCount": len(sessions),
+        "scores": {
+            "grammar": round(feedback_scores.grammar or 0, 1) if feedback_scores else 0,
+            "pronunciation": round(feedback_scores.pronunciation or 0, 1) if feedback_scores else 0,
+            "fluency": round(feedback_scores.fluency or 0, 1) if feedback_scores else 0
+        },
+        "streak": stat.login_streak_current if stat else 0
+    }
+
+@router.get("/system-stats")
+def get_system_performance_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Issue #40: System-wide stats for admin dashboard
+    Aggregated stats for system performance monitoring.
+    """
+    from app.models.content import SpeakingSession
+    from app.models.user import User as UserModel, UserRole
+    
+    # Only admins can view system stats
+    if current_user.role != UserRole.ADMIN:
+        from fastapi import HTTPException
+        raise HTTPException(403, "Admin access required")
+    
+    today = datetime.now().date()
+    week_ago = today - timedelta(days=7)
+    month_ago = today - timedelta(days=30)
+    
+    # User stats
+    total_users = db.query(UserModel).count()
+    active_users_7d = db.query(UserDailyStats.user_id).filter(
+        UserDailyStats.date >= week_ago
+    ).distinct().count()
+    
+    # Session stats
+    sessions_7d = db.query(SpeakingSession).filter(
+        SpeakingSession.start_time >= week_ago
+    ).count()
+    sessions_30d = db.query(SpeakingSession).filter(
+        SpeakingSession.start_time >= month_ago
+    ).count()
+    
+    # Average session duration
+    avg_duration = db.query(func.avg(UserDailyStats.speaking_duration_seconds)).filter(
+        UserDailyStats.date >= week_ago
+    ).scalar() or 0
+    
+    return {
+        "users": {
+            "total": total_users,
+            "active7d": active_users_7d
+        },
+        "sessions": {
+            "last7d": sessions_7d,
+            "last30d": sessions_30d,
+            "avgDurationMinutes": round(avg_duration / 60, 1) if avg_duration else 0
+        },
+        "generatedAt": datetime.now().isoformat()
+    }
+

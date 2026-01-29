@@ -1,6 +1,6 @@
 """
 Tests for Issue #27: Personalized Learning Path
-REQ-LEARNER-7: Learner xem learning path cá nhân hóa
+REQ-LEARNER-7: Learner xem learning path cá nhân hóa dựa trên proficiency level
 
 Run: pytest tests/unit/test_issue_27_learning_path.py -v
 """
@@ -9,14 +9,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.user import User, UserRole
+from app.models.proficiency import LearningPath
 
 
-class TestLearningPathEndpoint:
-    """Test GET /proficiency/path"""
+class TestPersonalizedLearningPathEndpoint:
+    """Test GET /proficiency/path - REQ-LEARNER-7"""
     
     # ========== SUCCESS CASES ==========
     
-    def test_learner_can_get_learning_path(
+    def test_learner_gets_personalized_path_with_all_required_fields(
         self,
         client: TestClient,
         learner_auth_headers: dict,
@@ -25,7 +26,7 @@ class TestLearningPathEndpoint:
         """
         GIVEN: Authenticated learner
         WHEN: Calls GET /proficiency/path
-        THEN: Returns personalized learning path
+        THEN: Returns current_level, recommended_topics, and next_milestone
         """
         response = client.get(
             "/proficiency/path",
@@ -35,12 +36,12 @@ class TestLearningPathEndpoint:
         assert response.status_code == 200
         data = response.json()
         
-        # Check required fields
-        assert "current_level" in data
-        assert "recommended_topics" in data
-        assert "next_milestone" in data
+        # Verify all required fields exist (per Issue #27 acceptance criteria)
+        assert "current_level" in data, "Missing current_level field"
+        assert "recommended_topics" in data, "Missing recommended_topics field"
+        assert "next_milestone" in data, "Missing next_milestone field"
     
-    def test_learning_path_has_valid_level(
+    def test_current_level_is_valid_cefr_level(
         self,
         client: TestClient,
         learner_auth_headers: dict
@@ -48,7 +49,7 @@ class TestLearningPathEndpoint:
         """
         GIVEN: Learner requests learning path
         WHEN: Path is returned
-        THEN: current_level is valid CEFR level (A1-C2)
+        THEN: current_level is valid CEFR level (A1, A2, B1, B2, C1, C2)
         """
         response = client.get(
             "/proficiency/path",
@@ -58,8 +59,9 @@ class TestLearningPathEndpoint:
         assert response.status_code == 200
         data = response.json()
         
-        valid_levels = ["A1", "A2", "B1", "B2", "C1", "C2"]
-        assert data["current_level"] in valid_levels
+        valid_cefr_levels = ["A1", "A2", "B1", "B2", "C1", "C2"]
+        assert data["current_level"] in valid_cefr_levels, \
+            f"Invalid CEFR level: {data['current_level']}"
     
     def test_recommended_topics_is_list(
         self,
@@ -69,7 +71,7 @@ class TestLearningPathEndpoint:
         """
         GIVEN: Learner requests learning path
         WHEN: Path is returned
-        THEN: recommended_topics is a non-empty list
+        THEN: recommended_topics is a list
         """
         response = client.get(
             "/proficiency/path",
@@ -79,45 +81,18 @@ class TestLearningPathEndpoint:
         assert response.status_code == 200
         data = response.json()
         
-        assert isinstance(data["recommended_topics"], list)
-        # Topics should have at least 1 item or be empty for beginners
-        # assert len(data["recommended_topics"]) >= 0
+        assert isinstance(data["recommended_topics"], list), \
+            "recommended_topics should be a list"
     
-    def test_learning_path_based_on_assessment(
-        self,
-        client: TestClient,
-        db_session: Session,
-        learner_auth_headers: dict,
-        learner_user: User
-    ):
-        """
-        GIVEN: Learner has completed proficiency assessment
-        WHEN: Requests learning path
-        THEN: Path reflects assessment results
-        """
-        # This test verifies the path is personalized
-        response = client.get(
-            "/proficiency/path",
-            headers=learner_auth_headers
-        )
-        
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Verify structure
-        assert "current_level" in data
-        assert "recommended_topics" in data
-        assert "next_milestone" in data
-    
-    def test_next_milestone_is_higher_level(
+    def test_next_milestone_higher_than_current_level(
         self,
         client: TestClient,
         learner_auth_headers: dict
     ):
         """
-        GIVEN: Learner has current level
+        GIVEN: Learner has a current level
         WHEN: Path is returned
-        THEN: next_milestone is higher than current_level (or same if C2)
+        THEN: next_milestone > current_level (unless C2)
         """
         response = client.get(
             "/proficiency/path",
@@ -129,21 +104,86 @@ class TestLearningPathEndpoint:
         
         level_order = ["A1", "A2", "B1", "B2", "C1", "C2"]
         current_idx = level_order.index(data["current_level"])
+        next_idx = level_order.index(data["next_milestone"])
         
         if data["current_level"] != "C2":
-            next_idx = level_order.index(data["next_milestone"])
-            assert next_idx > current_idx, "Next milestone should be higher level"
+            assert next_idx > current_idx, \
+                f"next_milestone ({data['next_milestone']}) should be higher than current_level ({data['current_level']})"
+        else:
+            # C2 is max level, next_milestone should also be C2
+            assert data["next_milestone"] == "C2"
+    
+    def test_new_user_without_assessment_gets_default_a1_path(
+        self,
+        client: TestClient,
+        create_test_user,
+        get_auth_headers
+    ):
+        """
+        GIVEN: New user without proficiency assessment
+        WHEN: Requests learning path
+        THEN: Gets default A1 path (beginner level)
+        """
+        # Create brand new user
+        new_user = create_test_user(email="newlearner@test.com")
+        headers = get_auth_headers(new_user)
+        
+        response = client.get(
+            "/proficiency/path",
+            headers=headers
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # New user should start at A1
+        assert data["current_level"] == "A1", \
+            "New users should default to A1 level"
+        assert data["next_milestone"] == "A2", \
+            "Next milestone for A1 should be A2"
+    
+    def test_user_with_existing_path_gets_personalized_recommendations(
+        self,
+        client: TestClient,
+        db_session: Session,
+        learner_auth_headers: dict,
+        learner_user: User
+    ):
+        """
+        GIVEN: User has completed proficiency assessment (B1 level)
+        WHEN: Requests learning path
+        THEN: Gets B1-appropriate recommendations
+        """
+        # Set user's level to B1
+        existing_path = LearningPath(
+            user_id=learner_user.user_id,
+            current_level="B1",
+            target_level="C1"
+        )
+        db_session.add(existing_path)
+        db_session.commit()
+        
+        response = client.get(
+            "/proficiency/path",
+            headers=learner_auth_headers
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["current_level"] == "B1"
+        assert data["next_milestone"] == "B2"
     
     # ========== ERROR CASES ==========
     
-    def test_unauthenticated_cannot_get_path(
+    def test_unauthenticated_request_returns_401(
         self,
         client: TestClient
     ):
         """
         GIVEN: No authentication
         WHEN: Tries to get learning path
-        THEN: Returns 401
+        THEN: Returns 401 Unauthorized
         """
         response = client.get("/proficiency/path")
         assert response.status_code == 401
@@ -156,50 +196,21 @@ class TestLearningPathEndpoint:
         """
         GIVEN: Admin is authenticated
         WHEN: Requests learning path
-        THEN: Returns 200 or 403 based on design
+        THEN: Returns 200 (admin also has learning path)
         """
         response = client.get(
             "/proficiency/path",
             headers=admin_auth_headers
         )
         
-        # Admin might or might not have learning path
-        assert response.status_code in [200, 403]
-    
-    # ========== EDGE CASES ==========
-    
-    def test_new_user_without_assessment_gets_default_path(
-        self,
-        client: TestClient,
-        create_test_user,
-        get_auth_headers
-    ):
-        """
-        GIVEN: New user without assessment
-        WHEN: Requests learning path
-        THEN: Gets default beginner path (A1)
-        """
-        user = create_test_user(email="newbie@test.com")
-        headers = get_auth_headers(user)
-        
-        response = client.get(
-            "/proficiency/path",
-            headers=headers
-        )
-        
-        # Should return default or prompt for assessment
-        assert response.status_code in [200, 404]
-        
-        if response.status_code == 200:
-            data = response.json()
-            # New user starts at A1 or needs assessment
-            assert data["current_level"] == "A1" or "assessment" in str(data).lower()
+        # Admin should also be able to access their own path
+        assert response.status_code == 200
 
 
-class TestLearningPathTopics:
-    """Test recommended topics content"""
+class TestLearningPathTopicsContent:
+    """Test recommended_topics structure and content"""
     
-    def test_topics_have_required_fields(
+    def test_topic_has_id_name_difficulty(
         self,
         client: TestClient,
         learner_auth_headers: dict
@@ -207,7 +218,7 @@ class TestLearningPathTopics:
         """
         GIVEN: Learner requests path
         WHEN: Topics are returned
-        THEN: Each topic has id, name, difficulty
+        THEN: Each topic has id, name, difficulty fields
         """
         response = client.get(
             "/proficiency/path",
@@ -219,23 +230,6 @@ class TestLearningPathTopics:
         
         if data["recommended_topics"]:
             topic = data["recommended_topics"][0]
-            # Check topic structure (adjust based on actual schema)
-            assert isinstance(topic, (str, dict))
-    
-    def test_topics_ordered_by_priority(
-        self,
-        client: TestClient,
-        learner_auth_headers: dict
-    ):
-        """
-        GIVEN: Learner requests path
-        WHEN: Topics are returned
-        THEN: Topics are ordered by learning priority
-        """
-        response = client.get(
-            "/proficiency/path",
-            headers=learner_auth_headers
-        )
-        
-        assert response.status_code == 200
-        # Topics should be in priority order (first = most important)
+            assert "id" in topic, "Topic missing 'id' field"
+            assert "name" in topic, "Topic missing 'name' field"
+            assert "difficulty" in topic, "Topic missing 'difficulty' field"

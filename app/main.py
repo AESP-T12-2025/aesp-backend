@@ -174,6 +174,7 @@ app.include_router(policies.router, tags=["Policies"])
 
 # Support routers
 app.include_router(support.router, tags=["Support"])
+app.include_router(support.admin_support_router, tags=["Admin Support"])  # Issue #33
 app.include_router(notification.router, tags=["Notifications"])
 
 # Analytics routers

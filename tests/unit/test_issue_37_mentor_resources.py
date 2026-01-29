@@ -1,169 +1,431 @@
 """
-Unit tests for Issue #37: Mentor Resources/Documents (Mentor)
-Testing mentor resource upload and management
+Tests for Issue #37: Mentor Resources/Documents
+Mentors upload/share Docs/Videos/Links with learners.
+
+Run: pytest tests/unit/test_issue_37_mentor_resources.py -v
 """
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.models.user import User, UserRole
+from app.models.mentor import Mentor
+from app.models.mentor_review import MentorResource
 
 
-class TestUploadResources:
-    """Test uploading mentor resources"""
+@pytest.fixture
+def mentor_profile(db: Session, mentor_user: User) -> Mentor:
+    """Create mentor profile for testing"""
+    mentor = Mentor(
+        user_id=mentor_user.user_id,
+        full_name="Resource Mentor",
+        bio="I share resources",
+        skills="Teaching",
+        verification_status="VERIFIED"
+    )
+    db.add(mentor)
+    db.commit()
+    db.refresh(mentor)
+    return mentor
 
-    def test_mentor_can_upload_document(self, client: TestClient, mentor_token: str):
-        """Mentor should be able to upload resource documents"""
+
+@pytest.fixture
+def sample_resource(db: Session, mentor_profile: Mentor) -> MentorResource:
+    """Create sample resource for testing"""
+    resource = MentorResource(
+        mentor_id=mentor_profile.user_id,  # FK to users.user_id
+        title="English Grammar Guide",
+        description="Comprehensive grammar reference",
+        resource_type="document",
+        file_url="https://cloudinary.com/example/grammar.pdf",
+        is_public=False
+    )
+    db.add(resource)
+    db.commit()
+    db.refresh(resource)
+    return resource
+
+
+class TestCreateMentorResource:
+    """Test POST /mentor/resources"""
+    
+    def test_mentor_can_create_document_resource(
+        self,
+        client: TestClient,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor
+    ):
+        """
+        GIVEN: Authenticated mentor
+        WHEN: Creates document resource
+        THEN: Resource is created with correct type
+        """
         response = client.post(
             "/mentor/resources",
+            headers=mentor_auth_headers,
             json={
-                "title": "Business English Cheat Sheet",
-                "description": "Common phrases for business meetings",
-                "type": "PDF",
-                "url": "https://example.com/resource.pdf"
-            },
-            headers={"Authorization": f"Bearer {mentor_token}"}
+                "title": "Vocabulary List",
+                "description": "Business English vocabulary",
+                "resource_type": "document",
+                "file_url": "https://storage.example.com/vocab.pdf"
+            }
         )
-
-        assert response.status_code == 200
+        
+        assert response.status_code in [200, 201]
         data = response.json()
-        assert "id" in data or "resource_id" in data
-
-    def test_learner_cannot_upload_resources(self, client: TestClient, learner_token: str):
-        """Learner should not be able to upload resources (mentor only)"""
+        assert data["title"] == "Vocabulary List"
+        assert data["resource_type"] == "document"
+    
+    def test_mentor_can_create_video_resource(
+        self,
+        client: TestClient,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor
+    ):
+        """
+        GIVEN: Authenticated mentor
+        WHEN: Creates video resource
+        THEN: Resource is created with video type
+        """
         response = client.post(
             "/mentor/resources",
-            json={"title": "Test", "type": "PDF"},
-            headers={"Authorization": f"Bearer {learner_token}"}
+            headers=mentor_auth_headers,
+            json={
+                "title": "Pronunciation Tips",
+                "resource_type": "video",
+                "file_url": "https://youtube.com/watch?v=example"
+            }
         )
-
-        assert response.status_code == 403
-
-    def test_upload_validation(self, client: TestClient, mentor_token: str):
-        """Upload with invalid data should return 422"""
+        
+        assert response.status_code in [200, 201]
+        data = response.json()
+        assert data["resource_type"] == "video"
+    
+    def test_mentor_can_create_link_resource(
+        self,
+        client: TestClient,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor
+    ):
+        """
+        GIVEN: Authenticated mentor
+        WHEN: Creates link resource
+        THEN: Resource is created with link type
+        """
         response = client.post(
             "/mentor/resources",
-            json={"title": ""},  # Missing required fields
-            headers={"Authorization": f"Bearer {mentor_token}"}
+            headers=mentor_auth_headers,
+            json={
+                "title": "Useful Website",
+                "resource_type": "link",
+                "file_url": "https://example-learning-site.com"
+            }
         )
+        
+        assert response.status_code in [200, 201]
+        data = response.json()
+        assert data["resource_type"] == "link"
+    
+    def test_invalid_resource_type_rejected(
+        self,
+        client: TestClient,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor
+    ):
+        """
+        GIVEN: Invalid resource type
+        WHEN: Mentor creates resource
+        THEN: Returns 400 error
+        """
+        response = client.post(
+            "/mentor/resources",
+            headers=mentor_auth_headers,
+            json={
+                "title": "Invalid",
+                "resource_type": "podcast",  # Not valid
+                "file_url": "https://example.com"
+            }
+        )
+        
+        assert response.status_code == 400
+    
+    def test_learner_cannot_create_resource(
+        self,
+        client: TestClient,
+        learner_auth_headers: dict
+    ):
+        """
+        GIVEN: User is learner
+        WHEN: Tries to create resource
+        THEN: Returns 400 (not a mentor)
+        """
+        response = client.post(
+            "/mentor/resources",
+            headers=learner_auth_headers,
+            json={
+                "title": "Test",
+                "resource_type": "document",
+                "file_url": "https://example.com"
+            }
+        )
+        
+        assert response.status_code == 400
 
-        assert response.status_code == 422
 
-
-class TestListResources:
-    """Test listing mentor resources"""
-
-    def test_learner_can_view_resources(self, client: TestClient, learner_token: str):
-        """Learners should be able to view available resources"""
+class TestGetMentorResources:
+    """Test GET /mentor/resources"""
+    
+    def test_mentor_can_view_own_resources(
+        self,
+        client: TestClient,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor,
+        sample_resource: MentorResource
+    ):
+        """
+        GIVEN: Mentor has resources
+        WHEN: Requests resource list
+        THEN: Returns their resources
+        """
         response = client.get(
-            "/resources",
-            headers={"Authorization": f"Bearer {learner_token}"}
+            "/mentor/resources",
+            headers=mentor_auth_headers
         )
-
+        
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-
-    def test_mentor_can_view_own_resources(self, client: TestClient, mentor_token: str):
-        """Mentor should be able to view their own uploaded resources"""
+        assert len(data) >= 1
+        assert any(r["title"] == "English Grammar Guide" for r in data)
+    
+    def test_resource_has_required_fields(
+        self,
+        client: TestClient,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor,
+        sample_resource: MentorResource
+    ):
+        """
+        GIVEN: Resources exist
+        WHEN: Fetched
+        THEN: Each has id, title, resource_type, url
+        """
         response = client.get(
             "/mentor/resources",
-            headers={"Authorization": f"Bearer {mentor_token}"}
+            headers=mentor_auth_headers
         )
-
+        
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
-
-    def test_filter_resources_by_type(self, client: TestClient, learner_token: str):
-        """Should be able to filter resources by type"""
-        response = client.get(
-            "/resources?type=PDF",
-            headers={"Authorization": f"Bearer {learner_token}"}
-        )
-
-        assert response.status_code == 200
+        
+        resource = data[0]
+        assert "resource_id" in resource
+        assert "title" in resource
+        assert "resource_type" in resource
+        assert "file_url" in resource
+        assert "created_at" in resource
 
 
-class TestUpdateResources:
-    """Test updating resources"""
-
-    def test_mentor_can_update_own_resource(self, client: TestClient, mentor_token: str):
-        """Mentor should be able to update their own resources"""
-        # Create resource
-        create_response = client.post(
-            "/mentor/resources",
-            json={"title": "Test", "description": "Original", "type": "PDF"},
-            headers={"Authorization": f"Bearer {mentor_token}"}
-        )
-        resource_id = create_response.json().get("id")
-
-        # Update it
+class TestUpdateMentorResource:
+    """Test PUT /mentor/resources/{id}"""
+    
+    def test_mentor_can_update_resource_title(
+        self,
+        client: TestClient,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor,
+        sample_resource: MentorResource
+    ):
+        """
+        GIVEN: Resource exists
+        WHEN: Mentor updates title
+        THEN: Title is changed
+        """
         response = client.put(
-            f"/mentor/resources/{resource_id}",
-            json={"title": "Updated Title", "description": "Updated"},
-            headers={"Authorization": f"Bearer {mentor_token}"}
+            f"/mentor/resources/{sample_resource.resource_id}",
+            headers=mentor_auth_headers,
+            json={"title": "Updated Grammar Guide"}
         )
-
+        
         assert response.status_code == 200
-
-    def test_mentor_cannot_update_others_resource(self, client: TestClient, mentor_token: str):
-        """Mentor should not be able to update other mentors' resources"""
+        data = response.json()
+        assert data["title"] == "Updated Grammar Guide"
+    
+    def test_mentor_can_make_resource_public(
+        self,
+        client: TestClient,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor,
+        sample_resource: MentorResource
+    ):
+        """
+        GIVEN: Private resource
+        WHEN: Mentor sets is_public=True
+        THEN: Resource becomes public
+        """
         response = client.put(
+            f"/mentor/resources/{sample_resource.resource_id}",
+            headers=mentor_auth_headers,
+            json={"is_public": True}
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["is_public"] == True
+    
+    def test_cannot_update_other_mentor_resource(
+        self,
+        client: TestClient,
+        db_session: Session,
+        create_test_user,
+        get_auth_headers,
+        sample_resource: MentorResource
+    ):
+        """
+        GIVEN: Resource belongs to another mentor
+        WHEN: Different mentor tries to update
+        THEN: Returns 400 or 404
+        """
+        # Create another mentor
+        other_mentor_user = create_test_user(
+            email="othermentor@test.com",
+            role=UserRole.MENTOR
+        )
+        other_mentor = Mentor(
+            user_id=other_mentor_user.user_id,
+            full_name="Other Mentor",
+            bio="Different mentor",
+            verification_status="VERIFIED"
+        )
+        db_session.add(other_mentor)
+        db_session.commit()
+        
+        headers = get_auth_headers(other_mentor_user)
+        
+        response = client.put(
+            f"/mentor/resources/{sample_resource.resource_id}",
+            headers=headers,
+            json={"title": "Stolen resource"}
+        )
+        
+        assert response.status_code in [400, 404]
+
+
+class TestDeleteMentorResource:
+    """Test DELETE /mentor/resources/{id}"""
+    
+    def test_mentor_can_delete_own_resource(
+        self,
+        client: TestClient,
+        db_session: Session,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor,
+        sample_resource: MentorResource
+    ):
+        """
+        GIVEN: Resource exists
+        WHEN: Mentor deletes it
+        THEN: Resource is removed
+        """
+        response = client.delete(
+            f"/mentor/resources/{sample_resource.resource_id}",
+            headers=mentor_auth_headers
+        )
+        
+        assert response.status_code == 200
+        
+        # Verify deleted
+        deleted = db_session.query(MentorResource).filter(
+            MentorResource.resource_id == sample_resource.resource_id
+        ).first()
+        assert deleted is None
+    
+    def test_delete_nonexistent_returns_404(
+        self,
+        client: TestClient,
+        mentor_auth_headers: dict,
+        mentor_profile: Mentor
+    ):
+        """
+        GIVEN: Resource ID does not exist
+        WHEN: Tries to delete
+        THEN: Returns 404
+        """
+        response = client.delete(
             "/mentor/resources/99999",
-            json={"title": "Hacked"},
-            headers={"Authorization": f"Bearer {mentor_token}"}
+            headers=mentor_auth_headers
         )
+        
+        assert response.status_code == 404
 
-        assert response.status_code in [403, 404]
 
-
-class TestDeleteResources:
-    """Test deleting resources"""
-
-    def test_mentor_can_delete_own_resource(self, client: TestClient, mentor_token: str):
-        """Mentor should be able to delete their own resources"""
-        # Create resource
-        create_response = client.post(
-            "/mentor/resources",
-            json={"title": "To Delete", "type": "PDF"},
-            headers={"Authorization": f"Bearer {mentor_token}"}
+class TestPublicResourcesAccess:
+    """Test GET /resources/public - learners access public resources"""
+    
+    def test_learner_can_view_public_resources(
+        self,
+        client: TestClient,
+        db_session: Session,
+        learner_auth_headers: dict,
+        mentor_profile: Mentor
+    ):
+        """
+        GIVEN: Public resources exist
+        WHEN: Learner requests public resources
+        THEN: Returns only public ones
+        """
+        # Create public resource
+        public_resource = MentorResource(
+            mentor_id=mentor_profile.user_id,
+            title="Free Learning Material",
+            resource_type="document",
+            file_url="https://example.com/free.pdf",
+            is_public=True
         )
-        resource_id = create_response.json().get("id")
-
-        # Delete it
-        response = client.delete(
-            f"/mentor/resources/{resource_id}",
-            headers={"Authorization": f"Bearer {mentor_token}"}
-        )
-
-        assert response.status_code == 200
-
-    def test_admin_can_delete_any_resource(self, client: TestClient, admin_token: str):
-        """Admin should be able to delete any resource"""
-        response = client.delete(
-            "/admin/resources/1",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-
-        assert response.status_code in [200, 404]
-
-
-class TestResourceDownload:
-    """Test downloading/accessing resources"""
-
-    def test_learner_can_download_resource(self, client: TestClient, learner_token: str):
-        """Learner should be able to access/download resources"""
+        db_session.add(public_resource)
+        db_session.commit()
+        
         response = client.get(
-            "/resources/1/download",
-            headers={"Authorization": f"Bearer {learner_token}"}
+            "/resources/public",
+            headers=learner_auth_headers
         )
-
-        # Might redirect or provide download URL
-        assert response.status_code in [200, 302, 404]
-
-    def test_track_resource_views(self, client: TestClient, learner_token: str):
-        """Should track resource view counts"""
-        response = client.post(
-            "/resources/1/view",
-            headers={"Authorization": f"Bearer {learner_token}"}
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        # All returned should be public
+        for resource in data:
+            assert resource["is_public"] == True
+    
+    def test_can_filter_public_by_type(
+        self,
+        client: TestClient,
+        db_session: Session,
+        learner_auth_headers: dict,
+        mentor_profile: Mentor
+    ):
+        """
+        GIVEN: Public resources of different types
+        WHEN: Filter by type=video
+        THEN: Returns only videos
+        """
+        # Create public video
+        video = MentorResource(
+            mentor_id=mentor_profile.user_id,
+            title="Tutorial Video",
+            resource_type="video",
+            file_url="https://youtube.com/example",
+            is_public=True
         )
-
-        assert response.status_code in [200, 404]
+        db_session.add(video)
+        db_session.commit()
+        
+        response = client.get(
+            "/resources/public?resource_type=video",
+            headers=learner_auth_headers
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        for resource in data:
+            assert resource["resource_type"] == "video"

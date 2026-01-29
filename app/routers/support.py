@@ -114,3 +114,97 @@ def update_ticket(
     db.commit()
     db.refresh(ticket)
     return ticket
+
+
+# --- Issue #33: Support Services/Tickets (Admin Endpoints) ---
+
+@router.post("/tickets", response_model=TicketResponse)
+def create_support_ticket(
+    ticket: TicketCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Issue #33: Learner creates support ticket
+    Alias for POST /support/ for API consistency
+    """
+    return create_ticket(ticket, db, current_user)
+
+
+# Admin-specific support router
+admin_support_router = APIRouter(prefix="/admin/support", tags=["Admin Support"])
+
+@admin_support_router.get("/tickets", response_model=List[TicketResponse])
+def admin_get_all_tickets(
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Issue #33: Admin views all support tickets
+    Status: OPEN, IN_PROGRESS, RESOLVED, CLOSED
+    """
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    query = db.query(SupportTicket)
+    
+    if status:
+        query = query.filter(SupportTicket.status == status)
+    if priority:
+        query = query.filter(SupportTicket.priority == priority)
+    
+    return query.order_by(SupportTicket.created_at.desc()).all()
+
+@admin_support_router.patch("/tickets/{ticket_id}", response_model=TicketResponse)
+def admin_update_ticket_status(
+    ticket_id: int,
+    update_data: TicketUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Issue #33: Admin updates ticket status
+    Valid transitions: OPEN → IN_PROGRESS → RESOLVED → CLOSED
+    """
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    ticket = db.query(SupportTicket).filter(SupportTicket.ticket_id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    
+    # Update fields
+    if update_data.status:
+        valid_statuses = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]
+        if update_data.status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+        ticket.status = update_data.status
+    
+    if update_data.priority:
+        valid_priorities = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+        if update_data.priority not in valid_priorities:
+            raise HTTPException(status_code=400, detail=f"Invalid priority. Must be one of: {valid_priorities}")
+        ticket.priority = update_data.priority
+    
+    db.commit()
+    db.refresh(ticket)
+    return ticket
+
+@admin_support_router.get("/tickets/{ticket_id}", response_model=TicketResponse)
+def admin_get_ticket_detail(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Admin: Get single ticket details"""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    ticket = db.query(SupportTicket).filter(SupportTicket.ticket_id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    
+    return ticket
+

@@ -1,0 +1,143 @@
+                 DANH SÁCH NHIỆM VỤ CỦA TRINH (trinhnt0278-wq)                  
+================================================================================
+
+ISSUE #40
+Tiêu đề: feat: Advanced Analytics & Daily Stats
+Ngày tạo: 2026-01-28T00:11:35Z
+Nhãn: Không có
+----------------------------------------
+MÔ TẢ CHI TIẾT:
+## Feature: Advanced Analytics & Daily Stats
+**Priority:** LOW
+**Role:** Admin/Learner
+
+### Requirements:
+- Deeper insights (Time of day analysis, Retention rate).
+- Daily stats aggregation for system performance.
+
+### Acceptance Criteria:
+- [ ] Backend aggregation pipelines.
+- [ ] New charts data endpoints.
+
+
+================================================================================
+
+ISSUE #37
+Tiêu đề: feat: Mentor Resources/Documents (Mentor)
+Ngày tạo: 2026-01-28T00:08:35Z
+Nhãn: Không có
+----------------------------------------
+MÔ TẢ CHI TIẾT:
+## Feature: Mentor Resources/Documents (Mentor)
+**Priority:** MEDIUM
+**Role:** Mentor
+
+### Requirements:
+- Mentors can upload Documents/Videos/Links.
+- Share resources with assigned learners.
+- Manage resource library (CRUD).
+
+### Acceptance Criteria:
+- [ ] API POST /mentor/resources (Upload/Create).
+- [ ] API GET /mentor/resources (List).
+- [ ] Storage integration (Cloudinary/Local) for files.
+
+
+================================================================================
+
+ISSUE #33
+Tiêu đề: feat: Support Services/Tickets (Admin)
+Ngày tạo: 2026-01-28T00:07:56Z
+Nhãn: Không có
+----------------------------------------
+MÔ TẢ CHI TIẾT:
+## Feature: Support Services/Tickets (Admin)
+**Priority:** MEDIUM
+**Role:** Admin/Learner
+
+### Requirements:
+- Learners can enable support requests/tickets.
+- Admins can view and resolve tickets.
+- Status tracking (Open -> In Progress -> Resolved).
+
+### Acceptance Criteria:
+- [ ] API POST /support/tickets (Learner).
+- [ ] API GET /admin/support/tickets (Admin).
+- [ ] API PATCH /admin/support/tickets/{id} to update status.
+
+
+================================================================================
+
+ISSUE #30
+Tiêu đề: [HIGH] REQ-MENTOR-5: Mentor Booking System
+Ngày tạo: 2026-01-27T15:06:54Z
+Nhãn: Không có
+----------------------------------------
+MÔ TẢ CHI TIẾT:
+## Issue #30: Mentor Booking System
+
+**Priority:** HIGH | **Time:** 4h | **Test file:** test_issue_30_booking_system.py
+
+---
+
+## Mo ta
+Mentor set availability, learner book session.
+
+## Endpoints
+- POST /mentors/availability (mentor sets schedule)
+- GET /mentors/availability  
+- GET /mentors/bookings
+- POST /mentors/{id}/book (learner books)
+- POST /mentors/bookings/{id}/accept
+- POST /mentors/bookings/{id}/reject
+
+## Acceptance Criteria
+- [ ] Mentor can set availability slots
+- [ ] Learner can book available mentor
+- [ ] Mentor can accept/reject bookings
+- [ ] Cannot book unavailable slot
+
+## Test Command
+pytest tests/unit/test_issue_30_booking_system.py -v
+
+## Implementation File
+app/routers/mentor.py
+
+================================================================================
+
+ISSUE #27
+Tiêu đề: [HIGH] REQ-LEARNER-7: Personalized Learning Path
+Ngày tạo: 2026-01-27T15:06:40Z
+Nhãn: Không có
+----------------------------------------
+MÔ TẢ CHI TIẾT:
+## Issue #27: Personalized Learning Path
+
+**Priority:** HIGH | **Time:** 4h | **Test file:** test_issue_27_learning_path.py
+
+---
+
+## Mo ta
+Learner xem learning path ca nhan hoa dua tren proficiency level.
+
+## Endpoint
+GET /proficiency/path
+
+## Response Format
+{current_level: A1-C2, recommended_topics: [], next_milestone: ...}
+
+## Acceptance Criteria
+- [ ] Returns current_level (A1-C2)
+- [ ] Returns recommended_topics list
+- [ ] Returns next_milestone
+- [ ] next_milestone > current_level
+- [ ] New user gets default A1 path
+
+## Test Command
+pytest tests/unit/test_issue_27_learning_path.py -v
+
+## Implementation File
+app/routers/proficiency.py
+
+================================================================================
+

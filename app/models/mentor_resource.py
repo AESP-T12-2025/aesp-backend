@@ -17,3 +17,7 @@ class MentorVocabSuggestion(Base):
 
     mentor = relationship("app.models.mentor.Mentor")
     topic = relationship("app.models.content.Topic")
+
+
+# Note: MentorResource model is defined in mentor_review.py to avoid duplication
+# Import from there: from app.models.mentor_review import MentorResource

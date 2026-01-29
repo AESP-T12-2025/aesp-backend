@@ -1,0 +1,383 @@
+                           ISSUE LIST - AESP BACKEND                            
+================================================================================
+
+ISSUE #42
+Title: fix: Subscription upgrade/cancel endpoints
+Created At: 2026-01-28T00:11:47Z
+Labels: bug
+Assignees: Hieu0408
+----------------------------------------
+DESCRIPTION:
+## Bug Fix: Subscription upgrade/cancel
+**Priority:** HIGH
+**Status:** Tests Failed
+
+### Problem:
+- Upgrade and Cancel subscription logic is unstable or incorrect (mocked?).
+
+### Acceptance Criteria:
+- [ ] Fix POST /subscriptions/upgrade.
+- [ ] Fix POST /subscriptions/cancel.
+- [ ] Verify database state changes correctly.
+
+
+================================================================================
+
+ISSUE #40
+Title: feat: Advanced Analytics & Daily Stats
+Created At: 2026-01-28T00:11:35Z
+Labels: None
+Assignees: trinhnt0278-wq
+----------------------------------------
+DESCRIPTION:
+## Feature: Advanced Analytics & Daily Stats
+**Priority:** LOW
+**Role:** Admin/Learner
+
+### Requirements:
+- Deeper insights (Time of day analysis, Retention rate).
+- Daily stats aggregation for system performance.
+
+### Acceptance Criteria:
+- [ ] Backend aggregation pipelines.
+- [ ] New charts data endpoints.
+
+
+================================================================================
+
+ISSUE #39
+Title: feat: Weekly/Monthly Reports (Learner)
+Created At: 2026-01-28T00:11:22Z
+Labels: None
+Assignees: huydd7998
+----------------------------------------
+DESCRIPTION:
+## Feature: Weekly/Monthly Reports (Learner)
+**Priority:** LOW
+**Role:** Learner
+
+### Requirements:
+- Auto-generate PDF/Email report at end of period.
+- Summary of progress, errors corrected, and XP gained.
+
+### Acceptance Criteria:
+- [ ] Cron job for report generation.
+- [ ] Email sending service integration.
+
+
+================================================================================
+
+ISSUE #38
+Title: feat: Purchase History Export (Admin)
+Created At: 2026-01-28T00:11:02Z
+Labels: None
+Assignees: Hieu0408
+----------------------------------------
+DESCRIPTION:
+## Feature: Purchase History Export (Admin)
+**Priority:** LOW
+**Role:** Admin
+
+### Requirements:
+- Admin can filter purchase logs.
+- Export to CSV/Excel.
+- View detailed invoice.
+
+### Acceptance Criteria:
+- [ ] API GET /admin/purchases/export.
+- [ ] CSV file generation logic.
+
+
+================================================================================
+
+ISSUE #37
+Title: feat: Mentor Resources/Documents (Mentor)
+Created At: 2026-01-28T00:08:35Z
+Labels: None
+Assignees: trinhnt0278-wq
+----------------------------------------
+DESCRIPTION:
+## Feature: Mentor Resources/Documents (Mentor)
+**Priority:** MEDIUM
+**Role:** Mentor
+
+### Requirements:
+- Mentors can upload Documents/Videos/Links.
+- Share resources with assigned learners.
+- Manage resource library (CRUD).
+
+### Acceptance Criteria:
+- [ ] API POST /mentor/resources (Upload/Create).
+- [ ] API GET /mentor/resources (List).
+- [ ] Storage integration (Cloudinary/Local) for files.
+
+
+================================================================================
+
+ISSUE #36
+Title: feat: Vocabulary System (Learner/Mentor)
+Created At: 2026-01-28T00:08:29Z
+Labels: None
+Assignees: Hieu0408
+----------------------------------------
+DESCRIPTION:
+## Feature: Vocabulary System (Learner/Mentor)
+**Priority:** MEDIUM
+**Role:** Learner/Mentor
+
+### Requirements:
+- Save new words from practice sessions.
+- Mentors can suggest vocabulary.
+- Learners can review saved words.
+- Flashcard-style review mode?
+
+### Acceptance Criteria:
+- [ ] API POST /vocabulary (Save word).
+- [ ] API GET /vocabulary (List saved words).
+- [ ] Mentor suggestion flow implementation.
+
+
+================================================================================
+
+ISSUE #35
+Title: feat: Progress Analytics & Heat Maps (Learner)
+Created At: 2026-01-28T00:08:21Z
+Labels: None
+Assignees: huydd7998
+----------------------------------------
+DESCRIPTION:
+## Feature: Progress Analytics & Heat Maps (Learner)
+**Priority:** MEDIUM
+**Role:** Learner
+
+### Requirements:
+- Track daily learning activity (Heatmap like GitHub).
+- XP/Streak tracking.
+- Skill radar chart (Grammar/Fluency/Pronunciation).
+
+### Acceptance Criteria:
+- [ ] API GET /learner/analytics returns daily counts.
+- [ ] Logic to update 'streak' on activity.
+- [ ] Heatmap data structure (date, value).
+
+
+================================================================================
+
+ISSUE #34
+Title: feat: Statistics & Reports Dashboard (Admin)
+Created At: 2026-01-28T00:08:06Z
+Labels: None
+Assignees: Hieu0408
+----------------------------------------
+DESCRIPTION:
+## Feature: Statistics & Reports Dashboard (Admin)
+**Priority:** MEDIUM
+**Role:** Admin
+
+### Requirements:
+- Visualize system health and business metrics.
+- User growth charts (New users per day/month).
+- Revenue stats (Package sales).
+- Active sessions count.
+
+### Acceptance Criteria:
+- [ ] API GET /admin/stats/users (Growth).
+- [ ] API GET /admin/stats/revenue (Sales).
+- [ ] Data aggregation logic for daily/monthly reports.
+
+
+================================================================================
+
+ISSUE #33
+Title: feat: Support Services/Tickets (Admin)
+Created At: 2026-01-28T00:07:56Z
+Labels: None
+Assignees: trinhnt0278-wq
+----------------------------------------
+DESCRIPTION:
+## Feature: Support Services/Tickets (Admin)
+**Priority:** MEDIUM
+**Role:** Admin/Learner
+
+### Requirements:
+- Learners can enable support requests/tickets.
+- Admins can view and resolve tickets.
+- Status tracking (Open -> In Progress -> Resolved).
+
+### Acceptance Criteria:
+- [ ] API POST /support/tickets (Learner).
+- [ ] API GET /admin/support/tickets (Admin).
+- [ ] API PATCH /admin/support/tickets/{id} to update status.
+
+
+================================================================================
+
+ISSUE #32
+Title: feat: Manage Mentor List (Admin)
+Created At: 2026-01-28T00:07:11Z
+Labels: None
+Assignees: huydd7998
+----------------------------------------
+DESCRIPTION:
+## Feature: Manage Mentor List (Admin)
+**Priority:** MEDIUM
+**Role:** Admin
+
+### Requirements:
+- View list of all mentors.
+- Filter by skills, status, or rating.
+- Approve/Reject mentor applications.
+- Verify mentor skills.
+
+### Acceptance Criteria:
+- [ ] API GET /admin/mentors with pagination/filter.
+- [ ] API PUT /admin/mentors/{id}/verify to approve.
+- [ ] UI: Mentor table with 'Verify' button functional.
+
+
+================================================================================
+
+ISSUE #30
+Title: [HIGH] REQ-MENTOR-5: Mentor Booking System
+Created At: 2026-01-27T15:06:54Z
+Labels: None
+Assignees: trinhnt0278-wq
+----------------------------------------
+DESCRIPTION:
+## Issue #30: Mentor Booking System
+
+**Priority:** HIGH | **Time:** 4h | **Test file:** test_issue_30_booking_system.py
+
+---
+
+## Mo ta
+Mentor set availability, learner book session.
+
+## Endpoints
+- POST /mentors/availability (mentor sets schedule)
+- GET /mentors/availability  
+- GET /mentors/bookings
+- POST /mentors/{id}/book (learner books)
+- POST /mentors/bookings/{id}/accept
+- POST /mentors/bookings/{id}/reject
+
+## Acceptance Criteria
+- [ ] Mentor can set availability slots
+- [ ] Learner can book available mentor
+- [ ] Mentor can accept/reject bookings
+- [ ] Cannot book unavailable slot
+
+## Test Command
+pytest tests/unit/test_issue_30_booking_system.py -v
+
+## Implementation File
+app/routers/mentor.py
+
+================================================================================
+
+ISSUE #29
+Title: [HIGH] REQ-MENTOR-2: Assessment Organization
+Created At: 2026-01-27T15:06:50Z
+Labels: None
+Assignees: huydd7998
+----------------------------------------
+DESCRIPTION:
+## Issue #29: Assessment Organization
+
+**Priority:** HIGH | **Time:** 5h | **Test file:** test_issue_29_mentor_assessments.py
+
+---
+
+## Mo ta
+Mentor to chuc assessments cho learners.
+
+## Endpoints
+- GET /mentor-sessions
+- POST /mentor-sessions/schedule
+- POST /mentor-sessions/assign-level
+
+## Acceptance Criteria
+- [ ] Mentor can view sessions
+- [ ] Can schedule assessments
+- [ ] Can assign proficiency level (A1-C2)
+- [ ] Learner cannot access mentor-sessions
+
+## Test Command
+pytest tests/unit/test_issue_29_mentor_assessments.py -v
+
+## Implementation File
+app/routers/mentor.py
+
+================================================================================
+
+ISSUE #27
+Title: [HIGH] REQ-LEARNER-7: Personalized Learning Path
+Created At: 2026-01-27T15:06:40Z
+Labels: None
+Assignees: trinhnt0278-wq
+----------------------------------------
+DESCRIPTION:
+## Issue #27: Personalized Learning Path
+
+**Priority:** HIGH | **Time:** 4h | **Test file:** test_issue_27_learning_path.py
+
+---
+
+## Mo ta
+Learner xem learning path ca nhan hoa dua tren proficiency level.
+
+## Endpoint
+GET /proficiency/path
+
+## Response Format
+{current_level: A1-C2, recommended_topics: [], next_milestone: ...}
+
+## Acceptance Criteria
+- [ ] Returns current_level (A1-C2)
+- [ ] Returns recommended_topics list
+- [ ] Returns next_milestone
+- [ ] next_milestone > current_level
+- [ ] New user gets default A1 path
+
+## Test Command
+pytest tests/unit/test_issue_27_learning_path.py -v
+
+## Implementation File
+app/routers/proficiency.py
+
+================================================================================
+
+ISSUE #26
+Title: [HIGH] REQ-ADMIN-2: Enable/Disable Account Toggle
+Created At: 2026-01-27T15:05:19Z
+Labels: None
+Assignees: huydd7998
+----------------------------------------
+DESCRIPTION:
+## Issue #26: Enable/Disable Account Toggle
+
+**Priority:** HIGH | **Time:** 2h | **Test file:** test_issue_26_toggle_account.py
+
+---
+
+## Mo ta
+Admin co the enable/disable user accounts.
+
+## Endpoint
+PUT /admin/users/{user_id}/toggle-status
+
+## Acceptance Criteria
+- [ ] Endpoint implemented
+- [ ] Admin can toggle user is_active
+- [ ] Returns 404 for non-existent user
+- [ ] Returns 403 for non-admin
+- [ ] Disabled user cannot login
+
+## Test Command
+pytest tests/unit/test_issue_26_toggle_account.py -v
+
+## Implementation File
+app/routers/admin.py
+
+================================================================================
+

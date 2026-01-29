@@ -194,3 +194,76 @@ def get_learning_path(
         "target_level": path.target_level,
         "roadmap": path.generated_roadmap_json or []
     }
+
+
+# --- Issue #27: Personalized Learning Path (REQ-LEARNER-7) ---
+
+class PersonalizedPathResponse(BaseModel):
+    current_level: str
+    recommended_topics: List[dict]
+    next_milestone: str
+
+@router.get("/path", response_model=PersonalizedPathResponse)
+def get_personalized_learning_path(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    REQ-LEARNER-7: Personalized Learning Path
+    Returns current level, recommended topics based on proficiency,
+    and next milestone (always higher than current level).
+    """
+    from app.models.content import Topic, Scenario
+    
+    # 1. Get user's learning path or default to A1
+    path = db.query(LearningPath).filter(
+        LearningPath.user_id == current_user.user_id
+    ).first()
+    
+    current_level = path.current_level if path else "A1"
+    
+    # 2. Calculate next milestone (must be higher than current)
+    level_order = ["A1", "A2", "B1", "B2", "C1", "C2"]
+    try:
+        current_idx = level_order.index(current_level)
+    except ValueError:
+        current_idx = 0
+        current_level = "A1"
+    
+    next_milestone = level_order[min(current_idx + 1, len(level_order) - 1)]
+    
+    # 3. Map CEFR to difficulty for topic recommendations
+    difficulty_map = {
+        "A1": "BEGINNER", "A2": "BEGINNER",
+        "B1": "INTERMEDIATE", "B2": "INTERMEDIATE",
+        "C1": "ADVANCED", "C2": "ADVANCED"
+    }
+    target_difficulty = difficulty_map.get(current_level, "BEGINNER")
+    
+    # 4. Get recommended topics based on user's level
+    topics = db.query(Topic).join(
+        Scenario, Topic.topic_id == Scenario.topic_id
+    ).filter(
+        Scenario.difficulty_level == target_difficulty
+    ).distinct().limit(5).all()
+    
+    recommended_topics = [
+        {
+            "id": t.topic_id,
+            "name": t.name,
+            "difficulty": target_difficulty
+        }
+        for t in topics
+    ]
+    
+    # 5. If no topics found, provide default recommendations
+    if not recommended_topics:
+        recommended_topics = [
+            {"id": 0, "name": f"Start with {target_difficulty} level content", "difficulty": target_difficulty}
+        ]
+    
+    return {
+        "current_level": current_level,
+        "recommended_topics": recommended_topics,
+        "next_milestone": next_milestone
+    }
