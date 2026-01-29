@@ -2,6 +2,7 @@
 Pytest fixtures and configuration for AESP Backend tests
 """
 import pytest
+from unittest.mock import patch
 from typing import Generator, Callable
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -64,7 +65,8 @@ def client(db: Session) -> Generator[TestClient, None, None]:
     except ImportError:
         pass
     
-    with TestClient(app) as test_client:
+    # Mock create_all_tables to avoid connecting to the main database
+    with patch("app.main.create_all_tables"), TestClient(app) as test_client:
         yield test_client
     
     # Re-enable limiter after tests

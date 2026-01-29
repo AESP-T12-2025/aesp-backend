@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional, List
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from datetime import datetime, timedelta
@@ -6,14 +7,33 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.utils import require_admin, paginate
 from app.core.constants import DAYS_IN_WEEK, DEFAULT_PAGE_SIZE
-from app.models.user import User, UserRole
+from pydantic import BaseModel, Field
+from app.core import security
+from app.models.user import User, UserRole, AuthProvider
 from app.models.payment import Transaction, UserSubscription, ServicePackage
 from app.models.policy import SystemPolicy
 from app.models.content import SpeakingSession, Topic, Scenario
 from app.models.mentor import Mentor, Booking, AvailabilitySlot
-from app.models.social import MentorPost, PostComment
+from app.models.social import MentorPost, PostComment, ModerationStatus
 
 router = APIRouter(prefix="/admin", tags=["Admin Dashboard"])
+
+# =============================================================================
+# SCHEMAS
+# =============================================================================
+
+class UserCreateAdmin(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    role: UserRole = UserRole.LEARNER
+    is_active: bool = True
+
+class UserUpdateAdmin(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None
 
 @router.get("/stats")
 def get_dashboard_stats(
@@ -147,6 +167,86 @@ def verify_mentor(
             db.commit()
             db.refresh(mentor)
             return {"message": "Mentor verified", "is_verified": True, "verification_status": "VERIFIED"}
+    
+    return {"message": "Mentor already verified or profile exists"}
+
+
+# =============================================================================
+# User Management (CRUD)
+# =============================================================================
+
+@router.post("/users")
+def admin_create_user(
+    user_in: UserCreateAdmin,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Admin only: Create a new user."""
+    require_admin(current_user)
+    
+    # Check if user already exists
+    existing_user = db.query(User).filter(User.email == user_in.email).first()
+    if existing_user:
+        raise HTTPException(400, "Email already registered")
+        
+    new_user = User(
+        email=user_in.email,
+        password_hash=security.get_password_hash(user_in.password),
+        full_name=user_in.full_name,
+        role=user_in.role,
+        is_active=user_in.is_active,
+        auth_provider=AuthProvider.LOCAL
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+
+@router.patch("/users/{user_id}")
+def admin_update_user(
+    user_id: int,
+    user_update: UserUpdateAdmin,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Admin only: Update any user detail."""
+    require_admin(current_user)
+    
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+        
+    # Update fields
+    update_data = user_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(user, key, value)
+        
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.delete("/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Admin only: Permanently delete a user."""
+    require_admin(current_user)
+    
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+        
+    # Safety: Don't delete self
+    if user.user_id == current_user.user_id:
+        raise HTTPException(400, "Cannot delete your own admin account")
+        
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted successfully", "user_id": user_id}
         raise HTTPException(404, "Mentor not found")
     
     mentor.verification_status = "VERIFIED"
@@ -205,26 +305,25 @@ def get_all_transactions(
     # Transform items
     result = []
     for t in paginated["items"]:
+        # Map SUCCESS to COMPLETED for frontend compatibility
+        status_val = t.status.value if hasattr(t.status, 'value') else t.status
+        if status_val == "SUCCESS":
+            status_val = "COMPLETED"
+            
         result.append({
             "transaction_id": t.id,
+            "id": t.id,
             "user_id": t.user_id,
             "user": {"full_name": t.user.full_name if t.user else None, "email": t.user.email if t.user else None},
             "package_id": t.package_id,
             "package": {"name": t.package.name if t.package else None},
             "amount": t.amount,
-            "status": t.status.value if hasattr(t.status, 'value') else t.status,
+            "status": status_val,
             "created_at": t.created_at.isoformat() if t.created_at else None
         })
     
-    return {
-        "items": result,
-        "total": paginated["total"],
-        "page": paginated["page"],
-        "per_page": paginated["per_page"],
-        "pages": paginated["pages"],
-        "has_next": paginated["has_next"],
-        "has_prev": paginated["has_prev"]
-    }
+    # Return flat list instead of paginated object as requested by frontend code: setTransactions(data)
+    return result
 
 
 # =============================================================================
@@ -608,20 +707,29 @@ def get_purchases(
     total = query.count()
     items = query.order_by(Transaction.created_at.desc()).offset(skip).limit(limit).all()
     
-    return [
-        {
+    result = []
+    for t in items:
+        # Map SUCCESS to COMPLETED for frontend compatibility
+        status_val = t.status.value if hasattr(t.status, 'value') else t.status
+        if status_val == "SUCCESS":
+            status_val = "COMPLETED"
+            
+        result.append({
             "id": t.id,
+            "transaction_id": t.id,
             "user_id": t.user_id,
             "user_email": t.user.email if t.user else None,
             "user_name": t.user.full_name if t.user else None,
+            "user": {"full_name": t.user.full_name if t.user else None, "email": t.user.email if t.user else None},
             "package_id": t.package_id,
             "package_name": t.package.name if t.package else None,
-            "amount": float(t.amount),
-            "status": t.status.value if hasattr(t.status, 'value') else t.status,
+            "package": {"name": t.package.name if t.package else None},
+            "amount": float(t.amount or 0),
+            "status": status_val,
             "created_at": t.created_at.isoformat() if t.created_at else None
-        }
-        for t in items
-    ]
+        })
+    
+    return result
 
 
 @router.get("/purchases/export")
@@ -663,3 +771,71 @@ def export_purchases(
     
     return {"format": format, "count": len(data), "data": data}
 
+
+# =============================================================================
+# Issue: Content Moderation Endpoints
+# =============================================================================
+
+@router.get("/posts")
+def get_admin_posts(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all posts for admin moderation."""
+    require_admin(current_user)
+
+    query = db.query(MentorPost).order_by(MentorPost.created_at.desc())
+    
+    if status and status != 'ALL':
+        query = query.filter(MentorPost.moderation_status == status)
+
+    posts = query.all()
+    
+    return [
+        {
+            "id": p.id,
+            "content": p.content,
+            "mentor_id": p.mentor_id,
+            "mentor_name": p.mentor.full_name if p.mentor else "Unknown",
+            "status": p.moderation_status.value if hasattr(p.moderation_status, 'value') else p.moderation_status,
+            "created_at": p.created_at
+        }
+        for p in posts
+    ]
+
+
+@router.put("/posts/{post_id}/moderate")
+def moderate_post(
+    post_id: int,
+    status: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Approve or reject a post."""
+    require_admin(current_user)
+
+    post = db.query(MentorPost).filter(MentorPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    # Validate status
+    if status not in ["APPROVED", "REJECTED", "PENDING"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    post.moderation_status = status
+    db.commit()
+    
+    return {"message": f"Post {status.lower()}"}
+
+
+@router.get("/reports/export")
+def export_reports_alias(
+    format: str = "csv",
+    start_date: str = None,
+    end_date: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Alias for /admin/reports/export - Issue #38"""
+    return export_purchases(format, start_date, end_date, db, current_user)

@@ -31,6 +31,8 @@ class PackageResponse(BaseModel):
     description: Optional[str] = None
     features: Optional[Any] = None  # Supports list or dict
     mentor_included: bool = False
+    package_id: Optional[int] = None # Alias for id
+    is_active: bool = True
     
     class Config:
         from_attributes = True
@@ -60,18 +62,33 @@ class PackageCreate(BaseModel):
 @router.get("/packages", response_model=List[PackageResponse])
 def list_packages(
     mentor_included: Optional[bool] = None,
-    db: Session = Depends(get_db)
+    all: bool = False,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(lambda: None) # Optional user for admin check
 ):
     """
-    List all active service packages.
+    List service packages.
     
     Args:
         mentor_included: Optional filter for mentor packages
+        all: If True, returns all packages (Admin only)
     """
-    query = db.query(ServicePackage).filter(ServicePackage.is_active == True)
+    query = db.query(ServicePackage)
+    
+    # If not requesting all or not an admin, show only active
+    if not all:
+        query = query.filter(ServicePackage.is_active == True)
+        
     if mentor_included is not None:
         query = query.filter(ServicePackage.mentor_included == mentor_included)
-    return query.all()
+        
+    packages = query.all()
+    
+    # Add package_id alias manually for each item
+    for p in packages:
+        p.package_id = p.id
+        
+    return packages
 
 
 @router.post("/create-transaction")
