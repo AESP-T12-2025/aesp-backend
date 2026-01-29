@@ -448,6 +448,150 @@ def submit_session_feedback(
     db.commit()
     return {"message": "Feedback submitted"}
 
+
+# =============================================================================
+# Issue #29: Assessment Organization (REQ-MENTOR-2)
+# =============================================================================
+
+class ScheduleAssessmentRequest(PydanticBase):
+    learner_id: int
+    slot_id: int
+    notes: Optional[str] = None
+
+class AssignLevelRequest(PydanticBase):
+    booking_id: int
+    level: str  # A1, A2, B1, B2, C1, C2
+
+@router.get("/mentor-sessions")
+def get_mentor_sessions(
+    status: Optional[str] = None,  # COMPLETED, PENDING, CONFIRMED
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Issue #29: List all mentor sessions for assessment.
+    Only mentors can view their sessions.
+    """
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        raise HTTPException(403, "Only mentors can access this endpoint")
+    
+    query = db.query(Booking).filter(Booking.mentor_id == mentor.mentor_id)
+    
+    if status:
+        query = query.filter(Booking.status == status)
+    
+    bookings = query.options(
+        joinedload(Booking.learner),
+        joinedload(Booking.slot)
+    ).order_by(Booking.booking_id.desc()).all()
+    
+    result = []
+    for b in bookings:
+        result.append({
+            "booking_id": b.booking_id,
+            "learner_id": b.learner_id,
+            "learner_name": b.learner.full_name if b.learner else "Unknown",
+            "status": b.status,
+            "scheduled_time": b.slot.start_time.isoformat() if b.slot and b.slot.start_time else None,
+            "has_assessment": False  # Will be updated below
+        })
+    
+    return result
+
+@router.post("/mentor-sessions/schedule")
+def schedule_assessment_session(
+    data: ScheduleAssessmentRequest,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Issue #29: Schedule an assessment session for a learner.
+    Mentor creates a new booking specifically for assessment.
+    """
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        raise HTTPException(403, "Only mentors can schedule assessments")
+    
+    # Verify slot belongs to this mentor
+    slot = db.query(AvailabilitySlot).filter(
+        AvailabilitySlot.slot_id == data.slot_id,
+        AvailabilitySlot.mentor_id == mentor.mentor_id
+    ).first()
+    if not slot:
+        raise HTTPException(404, "Slot not found or doesn't belong to you")
+    
+    # Create assessment booking
+    booking = Booking(
+        mentor_id=mentor.mentor_id,
+        learner_id=data.learner_id,
+        slot_id=data.slot_id,
+        status="CONFIRMED"  # Auto-confirm for mentor-initiated
+    )
+    db.add(booking)
+    
+    # Mark slot as booked
+    slot.status = "BOOKED"
+    
+    db.commit()
+    
+    return {
+        "message": "Assessment session scheduled",
+        "booking_id": booking.booking_id
+    }
+
+@router.post("/mentor-sessions/assign-level")
+def assign_proficiency_level(
+    data: AssignLevelRequest,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Issue #29: Assign proficiency level (A1-C2) to learner after assessment.
+    Updates learner's LearningPath.
+    """
+    from app.models.proficiency import LearningPath
+    
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        raise HTTPException(403, "Only mentors can assign levels")
+    
+    # Validate level
+    valid_levels = ["A1", "A2", "B1", "B2", "C1", "C2"]
+    if data.level not in valid_levels:
+        raise HTTPException(400, f"Invalid level. Must be one of: {valid_levels}")
+    
+    # Get booking and verify it belongs to this mentor
+    booking = db.query(Booking).filter(
+        Booking.booking_id == data.booking_id,
+        Booking.mentor_id == mentor.mentor_id
+    ).first()
+    if not booking:
+        raise HTTPException(404, "Booking not found or doesn't belong to you")
+    
+    # Update or create learner's learning path
+    path = db.query(LearningPath).filter(LearningPath.user_id == booking.learner_id).first()
+    if path:
+        path.current_level = data.level
+    else:
+        path = LearningPath(
+            user_id=booking.learner_id,
+            current_level=data.level,
+            target_level="C2"  # Default target
+        )
+        db.add(path)
+    
+    # Mark booking as completed
+    booking.status = "COMPLETED"
+    
+    db.commit()
+    
+    return {
+        "message": f"Level {data.level} assigned to learner",
+        "learner_id": booking.learner_id,
+        "level": data.level
+    }
+
 # --- Mentor Assessments for Learners ---
 from pydantic import BaseModel as PydanticBase
 from typing import Optional
