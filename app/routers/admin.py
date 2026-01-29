@@ -247,11 +247,7 @@ def admin_delete_user(
     db.delete(user)
     db.commit()
     return {"message": "User deleted successfully", "user_id": user_id}
-        raise HTTPException(404, "Mentor not found")
-    
-    mentor.verification_status = "VERIFIED"
-    db.commit()
-    return {"message": "Mentor verified", "is_verified": True, "verification_status": "VERIFIED"}
+
 
 @router.post("/packages")
 def create_package(
