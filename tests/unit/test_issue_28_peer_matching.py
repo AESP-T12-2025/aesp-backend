@@ -12,7 +12,7 @@ from app.models.user import User, UserRole
 
 
 class TestFindPartnerEndpoint:
-    """Test POST /peer/find-partner"""
+    """Test POST /peer/join-queue"""
     
     # ========== SUCCESS CASES ==========
     
@@ -23,11 +23,11 @@ class TestFindPartnerEndpoint:
     ):
         """
         GIVEN: Authenticated learner
-        WHEN: Calls POST /peer/find-partner
+        WHEN: Calls POST /peer/join-queue
         THEN: Returns partner match or waiting status
         """
         response = client.post(
-            "/peer/find-partner",
+            "/peer/join-queue",
             headers=learner_auth_headers
         )
         
@@ -48,7 +48,7 @@ class TestFindPartnerEndpoint:
         THEN: Returns session_id for practice
         """
         response = client.post(
-            "/peer/find-partner",
+            "/peer/join-queue",
             headers=learner_auth_headers
         )
         
@@ -79,11 +79,11 @@ class TestFindPartnerEndpoint:
         
         # Both request partners
         response1 = client.post(
-            "/peer/find-partner",
+            "/peer/join-queue",
             headers=learner_auth_headers
         )
         response2 = client.post(
-            "/peer/find-partner",
+            "/peer/join-queue",
             headers=headers2
         )
         
@@ -102,7 +102,7 @@ class TestFindPartnerEndpoint:
         THEN: Matches with learner interested in same topic
         """
         response = client.post(
-            "/peer/find-partner",
+            "/peer/join-queue",
             headers=learner_auth_headers,
             json={"topic_preference": "business"}
         )
@@ -120,7 +120,7 @@ class TestFindPartnerEndpoint:
         WHEN: Tries to find partner
         THEN: Returns 401
         """
-        response = client.post("/peer/find-partner")
+        response = client.post("/peer/join-queue")
         assert response.status_code == 401
     
     def test_admin_cannot_find_peer_partner(
@@ -134,7 +134,7 @@ class TestFindPartnerEndpoint:
         THEN: Returns 403 (admins don't practice)
         """
         response = client.post(
-            "/peer/find-partner",
+            "/peer/join-queue",
             headers=admin_auth_headers
         )
         
@@ -151,38 +151,75 @@ class TestFindPartnerEndpoint:
         get_auth_headers
     ):
         """
-        GIVEN: Learners with different levels
+        GIVEN: Learners with adjacent levels (A1 and A2)
         WHEN: Finding partner
-        THEN: Match with similar level learner
+        THEN: Match them together (relaxed matching)
         """
-        # Create B1 learner
-        learner_b1 = create_test_user(
-            email="b1_learner@test.com",
+        from app.models.proficiency import LearningPath
+
+        # Create A1 learner
+        learner_a1 = create_test_user(
+            email="a1_learner@test.com",
             role=UserRole.LEARNER
         )
+        db_session.add(LearningPath(user_id=learner_a1.user_id, current_level="A1", target_level="A2"))
         
-        # Create B2 learner
-        learner_b2 = create_test_user(
-            email="b2_learner@test.com",
+        # Create A2 learner
+        learner_a2 = create_test_user(
+            email="a2_learner@test.com",
             role=UserRole.LEARNER
         )
+        db_session.add(LearningPath(user_id=learner_a2.user_id, current_level="A2", target_level="B1"))
+        db_session.commit()
         
-        headers_b1 = get_auth_headers(learner_b1)
-        headers_b2 = get_auth_headers(learner_b2)
+        headers_a1 = get_auth_headers(learner_a1)
+        headers_a2 = get_auth_headers(learner_a2)
         
-        # Both request matching
-        response_b1 = client.post(
-            "/peer/find-partner",
-            headers=headers_b1
-        )
-        response_b2 = client.post(
-            "/peer/find-partner",
-            headers=headers_b2
-        )
+        # A1 starts searching
+        client.post("/peer/join-queue", headers=headers_a1)
         
-        # Should get some response
-        assert response_b1.status_code in [200, 201, 202]
-        assert response_b2.status_code in [200, 201, 202]
+        # A2 searches and should match with A1
+        response = client.post("/peer/join-queue", headers=headers_a2)
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "MATCHED"
+        assert data["partner"]["id"] == learner_a1.user_id
+        assert "call_id" in data
+        assert data["session_type"] == "voice"
+
+    def test_match_by_same_session_type(
+        self,
+        client: TestClient,
+        db_session: Session,
+        create_test_user,
+        get_auth_headers
+    ):
+        """
+        GIVEN: Two learners with same level but different session types
+        WHEN: Finding partner
+        THEN: They should NOT match
+        """
+        from app.models.proficiency import LearningPath
+
+        # Create two B1 learners
+        l1 = create_test_user(email="l1@test.com", role=UserRole.LEARNER)
+        l2 = create_test_user(email="l2@test.com", role=UserRole.LEARNER)
+        db_session.add(LearningPath(user_id=l1.user_id, current_level="B1", target_level="B2"))
+        db_session.add(LearningPath(user_id=l2.user_id, current_level="B1", target_level="B2"))
+        db_session.commit()
+
+        h1 = get_auth_headers(l1)
+        h2 = get_auth_headers(l2)
+
+        # L1 searches for video
+        client.post("/peer/join-queue?session_type=video", headers=h1)
+        
+        # L2 searches for voice (default)
+        response = client.post("/peer/join-queue", headers=h2)
+        
+        assert response.status_code == 200
+        assert response.json()["status"] == "WAITING"
 
 
 class TestPeerSession:
@@ -200,7 +237,7 @@ class TestPeerSession:
         """
         # First find a partner
         match_response = client.post(
-            "/peer/find-partner",
+            "/peer/join-queue",
             headers=learner_auth_headers
         )
         
@@ -209,7 +246,7 @@ class TestPeerSession:
             
             # Get session details
             session_response = client.get(
-                f"/peer/sessions/{session_id}",
+                f"/peer/status/{session_id}",
                 headers=learner_auth_headers
             )
             
@@ -227,7 +264,7 @@ class TestPeerSession:
         """
         # Find partner first
         match_response = client.post(
-            "/peer/find-partner",
+            "/peer/join-queue",
             headers=learner_auth_headers
         )
         
@@ -254,7 +291,7 @@ class TestPeerSession:
         """
         # Start searching
         client.post(
-            "/peer/find-partner",
+            "/peer/join-queue",
             headers=learner_auth_headers
         )
         

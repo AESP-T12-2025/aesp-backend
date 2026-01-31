@@ -12,6 +12,8 @@ class PeerSession(Base):
     topic_id = Column(String, nullable=True)
     level = Column(String, nullable=True)
     status = Column(String, default="WAITING") # WAITING, MATCHED, COMPLETED
+    session_type = Column(String, default="voice") # voice, video (defaulting to voice as requested)
+    call_id = Column(String, nullable=True) # For signaling/calling identification
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user1 = relationship("User", foreign_keys=[user1_id])
