@@ -24,6 +24,8 @@ class User(Base):
     auth_provider = Column(SqlEnum(AuthProvider), default=AuthProvider.LOCAL)
     is_active = Column(Boolean, default=True)
     daily_learning_goal = Column(Integer, default=15) # Minutes/day
+    learning_target = Column(String, default="General English")
+    preferred_practice_time = Column(String, default="Anytime")
     bonus_xp = Column(Integer, default=0) # XP earned from challenges/events
     created_at = Column(DateTime, default=func.now())
 

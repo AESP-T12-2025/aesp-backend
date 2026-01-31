@@ -43,6 +43,11 @@ class ChatRequest(BaseModel):
     )
 
 
+class SuggestionRequest(BaseModel):
+    """Request schema for AI suggestion."""
+    context: str = Field(..., max_length=1000)
+
+
 class AnalyzeRequest(BaseModel):
     """Request schema for speech analysis."""
     text: str = Field(..., min_length=1, max_length=5000)
@@ -82,6 +87,18 @@ async def chat(request: ChatRequest):
         request.context
     )
     return {"reply": response}
+
+
+@router.post("/suggest-reply")
+async def suggest_reply(request: SuggestionRequest):
+    """
+    Generate a suggested response for the learner to say.
+    
+    Based on the scenario description (context), the AI suggests 
+    a natural sentence or phrase to start speaking.
+    """
+    response = await ai_service.generate_response_suggestion(request.context)
+    return {"suggestion": response}
 
 
 @router.post("/analyze")

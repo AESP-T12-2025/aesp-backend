@@ -113,6 +113,41 @@ class GeminiService:
             logger.error(f"Gemini chat error: {e}", exc_info=True)
             return "Sorry, I'm having trouble processing your request right now."
 
+    async def generate_response_suggestion(
+        self, 
+        context: str
+    ) -> str:
+        """
+        Generate a suggested response for the user to say in a given context.
+        
+        Args:
+            context: The scenario description or roleplay context.
+            
+        Returns:
+            A suggested English sentence or short paragraph.
+        """
+        if not self.model:
+            logger.error("Gemini model not initialized")
+            return "Hello, I would like to practice English."
+        
+        try:
+            prompt = f"""
+            The user is in a roleplay scenario described as: '{context}'. 
+            
+            Provide a natural, simple English sentence or short paragraph that the user could say AND START SPEAKING IMMEDIATELY to start or continue this interaction.
+            
+            - If it's an introduction, suggest a greeting and self-introduction.
+            - If it's a specific situation (e.g., ordering coffee), suggest a relevant request.
+            - Keep it simple (A1-B1 level) but natural.
+            - Return ONLY the suggested English text, no quotes or explanations.
+            """
+            response = self.model.generate_content(prompt)
+            return response.text.strip().replace('"', '')
+            
+        except Exception as e:
+            logger.error(f"Gemini suggestion error: {e}", exc_info=True)
+            return "Hello, I am ready to start the conversation."
+
     async def analyze_speech(self, text: str) -> dict:
         """
         Analyze user's speech text for grammar, pronunciation, and fluency.
@@ -161,6 +196,8 @@ class GeminiService:
             
             # Cleanup Markdown code blocks if present
             cleaned_text = response.text.strip()
+            print(f"DEBUG: Raw AI Response: {cleaned_text}") # DEBUG PRINT
+            
             if cleaned_text.startswith("```"):
                 cleaned_text = cleaned_text.split("```")[1]
                 if cleaned_text.startswith("json"):
@@ -173,11 +210,13 @@ class GeminiService:
             
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse AI response as JSON: {e}")
-            return self._get_error_response("Invalid AI response format")
+            print(f"DEBUG: JSON Error: {e}")
+            return self._get_error_response(f"AI Response Error: {str(e)}")
             
         except Exception as e:
             logger.error(f"Gemini analysis error: {e}", exc_info=True)
-            return self._get_error_response()
+            print(f"DEBUG: General Error: {e}")
+            return self._get_error_response(f"System Error: {str(e)}")
 
     def _get_error_response(self, message: str = "AI service unavailable.") -> dict:
         """Return a standardized error response."""

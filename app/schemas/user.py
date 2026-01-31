@@ -18,6 +18,9 @@ class UserResponse(UserBase):
     user_id: int
     avatar_url: Optional[str] = None
     daily_learning_goal: Optional[int] = 15
+    learning_target: Optional[str] = "General English"
+    preferred_practice_time: Optional[str] = "Anytime"
+    target_level: Optional[str] = None
     # is_admin is removed, frontend check role == UserRole.ADMIN
 
     class Config:
