@@ -54,40 +54,44 @@ async def submit_test(
         score = 0
     else:
         correct_count = 0
+        logger.info(f"DEBUG: Processing answers: {data.answers}")
+        
         for q in test.questions_json:
-            qid = str(q.get("id"))
-            user_ans = data.answers.get(qid)
-            if user_ans and user_ans == q.get("correct_option"):
+            # Handle both string and int possibilities for ID matching
+            qid_str = str(q.get("id"))
+            qid_int = q.get("id")
+            
+            # Try getting answer with string key first, then int key
+            user_ans = data.answers.get(qid_str)
+            if user_ans is None and isinstance(qid_int, int):
+                 user_ans = data.answers.get(qid_int) # Try generic lookup if keys are ints
+            
+            # Simple normalization of string keys in answers dict if it helps
+            # But safer to just look up flexible.
+            
+            correct_opt = q.get("correct_option")
+            logger.info(f"DEBUG: Q{qid_str} - User: {user_ans} vs Correct: {correct_opt}") 
+            
+            if user_ans and user_ans == correct_opt:
                 correct_count += 1
         
         score = (correct_count / total_questions) * 100
+        logger.info(f"DEBUG: Total Score: {score} ({correct_count}/{total_questions})")
 
-    # 2b. Add Speaking Score (if any)
+    # 2b. (Removed Speaking Score - Grammar/Vocab only)
     ai_feedback = None
-    if data.speaking_text:
-        try:
-            from app.services.ai_service import ai_service
-            # Analyze speaking
-            ai_res = await ai_service.analyze_speech(data.speaking_text)
-            
-            # Simple average: 70% Questions + 30% Speaking
-            speaking_score = (ai_res.get("grammar_score", 0) + ai_res.get("pronunciation_score", 0)) / 2
-            
-            # Weighted Score
-            score = (score * 0.7) + (speaking_score * 0.3)
-            ai_feedback = ai_res.get("detailed_feedback") or "Good effort!"
-        except Exception as e:
-            logger.error(f"AI speech analysis error: {e}") 
+    # if data.speaking_text: ... (REMOVED)
     
     score = min(100, score) # Cap at 100
 
     # 3. Determine Level
     level = "A1" # Default
     if test.level_criteria_json:
-        # e.g. {"A1": 0, "A2": 30, "B1": 50, ...}
-        # Find highest key where score >= val
-        # Simplified logic:
-        for lvl, min_score in test.level_criteria_json.items():
+        # Sort criteria by score ascending to ensure we find the highest matching level
+        # items() -> [("A1", 0), ("A2", 30)...]
+        sorted_criteria = sorted(test.level_criteria_json.items(), key=lambda item: item[1])
+        
+        for lvl, min_score in sorted_criteria:
             if score >= min_score:
                 level = lvl
     else:
@@ -127,38 +131,115 @@ async def submit_test(
     else:
         roadmap = [f"No {target_difficulty} scenarios found. Please contact admin."]
 
+    # Query existing path to update or create new
     existing_path = db.query(LearningPath).filter(LearningPath.user_id == current_user.user_id).first()
-    if existing_path:
-        existing_path.current_level = level
-        existing_path.generated_roadmap_json = roadmap
-    else:
-        new_path = LearningPath(
-            user_id=current_user.user_id,
-            current_level=level,
-            target_level="C1", 
-            generated_roadmap_json=roadmap
-        )
-        db.add(new_path)
+
+    try:
+        if existing_path:
+            existing_path.current_level = level
+            existing_path.generated_roadmap_json = roadmap
+        else:
+            new_path = LearningPath(
+                user_id=current_user.user_id,
+                current_level=level,
+                target_level="C1", 
+                generated_roadmap_json=roadmap
+            )
+            db.add(new_path)
+        
+        db.commit()
+    except Exception as e:
+        logger.error(f"Database commit error in submit_test: {e}")
+        db.rollback()
+        return {"level": level, "score": score, "message": "Assessment complete (Data save failed)", "feedback": "Great job completing the test!"}
     
-    db.commit()
-    db.commit()
-    return {"level": level, "score": score, "message": "Assessment complete", "feedback": ai_feedback}
+    return {"level": level, "score": score, "message": "Assessment complete", "feedback": "Great job! Based on your grammar and vocabulary, we have assigned your level."}
 
 @router.get("/test", response_model=TestResponse)
 def get_placement_test(db: Session = Depends(get_db)):
     # Return the first active test (Placement Test)
     test = db.query(ProficiencyTest).first()
     if not test:
-        # Create a default seed test if none exists
+        # Create a comprehensive placement test with 20 questions (Grammar & Vocabulary Only)
         default_questions = [
-             {"id": 1, "type": "grammar", "text": "I _____ (be) a student.", "options": ["am", "is", "are", "be"], "correct_option": "am"},
-             {"id": 2, "type": "vocabulary", "text": "Opposite of 'Big'?", "options": ["Large", "Small", "Huge", "Giant"], "correct_option": "Small"},
-             {"id": 3, "type": "pronunciation", "text": "Please read this sentence: 'The quick brown fox jumps over the lazy dog.'", "correct_option": "audio_check"},
+            # ============================================
+            # GRAMMAR SECTION (10 questions - A1 to C1)
+            # ============================================
+            # A1 Level
+            {"id": 1, "type": "grammar", "text": "She _____ to school every day.", 
+             "options": ["go", "goes", "going", "gone"], "correct_option": "goes"},
+            {"id": 2, "type": "grammar", "text": "I _____ a student.", 
+             "options": ["am", "is", "are", "be"], "correct_option": "am"},
+            {"id": 3, "type": "grammar", "text": "They _____ playing football now.", 
+             "options": ["is", "are", "am", "be"], "correct_option": "are"},
+            
+            # A2 Level
+            {"id": 4, "type": "grammar", "text": "He _____ to London last week.", 
+             "options": ["go", "goes", "went", "gone"], "correct_option": "went"},
+            {"id": 5, "type": "grammar", "text": "I have _____ my homework.", 
+             "options": ["do", "did", "done", "doing"], "correct_option": "done"},
+            
+            # B1 Level
+            {"id": 6, "type": "grammar", "text": "If I _____ rich, I would travel the world.", 
+             "options": ["am", "was", "were", "be"], "correct_option": "were"},
+            {"id": 7, "type": "grammar", "text": "The book _____ by millions of people.", 
+             "options": ["has read", "was read", "is reading", "read"], "correct_option": "was read"},
+            
+            # B2 Level
+            {"id": 8, "type": "grammar", "text": "By this time next year, I _____ graduated.", 
+             "options": ["will have", "would have", "have", "had"], "correct_option": "will have"},
+            {"id": 9, "type": "grammar", "text": "He asked me where I _____.", 
+             "options": ["live", "lived", "living", "am living"], "correct_option": "lived"},
+            
+            # C1 Level
+            {"id": 10, "type": "grammar", "text": "_____ the circumstances, we decided to postpone the meeting.", 
+             "options": ["Given", "Giving", "To give", "Having given"], "correct_option": "Given"},
+            
+            # ============================================
+            # VOCABULARY SECTION (10 questions - A1 to C1)
+            # ============================================
+            # A1-A2 Level
+            {"id": 11, "type": "vocabulary", "text": "What is the opposite of 'big'?", 
+             "options": ["Large", "Small", "Huge", "Giant"], "correct_option": "Small"},
+            {"id": 12, "type": "vocabulary", "text": "Choose the synonym of 'happy':", 
+             "options": ["Sad", "Angry", "Joyful", "Tired"], "correct_option": "Joyful"},
+            {"id": 13, "type": "vocabulary", "text": "A person who teaches in a school is called a _____.", 
+             "options": ["Doctor", "Teacher", "Engineer", "Lawyer"], "correct_option": "Teacher"},
+            
+            # B1 Level
+            {"id": 14, "type": "vocabulary", "text": "To 'postpone' means to _____.", 
+             "options": ["Cancel", "Delay", "Start", "Finish"], "correct_option": "Delay"},
+            {"id": 15, "type": "vocabulary", "text": "Something that is 'inevitable' is _____.", 
+             "options": ["Impossible", "Avoidable", "Certain to happen", "Optional"], "correct_option": "Certain to happen"},
+            
+            # B2 Level
+            {"id": 16, "type": "vocabulary", "text": "The word 'ubiquitous' means _____.", 
+             "options": ["Rare", "Present everywhere", "Invisible", "Expensive"], "correct_option": "Present everywhere"},
+            {"id": 17, "type": "vocabulary", "text": "To 'exacerbate' a problem means to _____.", 
+             "options": ["Solve it", "Ignore it", "Make it worse", "Prevent it"], "correct_option": "Make it worse"},
+            {"id": 18, "type": "vocabulary", "text": "'Paradigm' most closely means _____.", 
+             "options": ["Problem", "Model or pattern", "Mistake", "Paradox"], "correct_option": "Model or pattern"},
+             
+            # C1 Level (New additions)
+            {"id": 19, "type": "vocabulary", "text": "Which word is a synonym for 'ephemeral'?", 
+             "options": ["Lasting", "Short-lived", "Heavy", "Important"], "correct_option": "Short-lived"},
+            {"id": 20, "type": "vocabulary", "text": "To 'scrutinize' means to _____.", 
+             "options": ["Ignore", "Examine closely", "Write quickly", "Understand fully"], "correct_option": "Examine closely"},
         ]
+        
+        # Level criteria (adjusted for 20 questions)
+        # A1: 0-29% (0-5 correct)
+        # A2: 30-49% (6-9 correct)
+        # B1: 50-69% (10-13 correct)
+        # B2: 70-84% (14-16 correct)
+        # C1: 85-94% (17-18 correct)
+        # C2: 95-100% (19-20 correct)
+        level_criteria = {"A1": 0, "A2": 30, "B1": 50, "B2": 70, "C1": 85, "C2": 95}
+        
         test = ProficiencyTest(
-            title="General Placement Test",
+            title="Grammar & Vocabulary Placement Test",
             questions_json=default_questions,
-            level_criteria_json={"A1": 0, "A2": 30, "B1": 50, "B2": 70, "C1": 85, "C2": 95}
+            level_criteria_json=level_criteria
         )
         db.add(test)
         db.commit()

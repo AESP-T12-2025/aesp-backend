@@ -54,7 +54,24 @@ class GeminiService:
             model_name: The Gemini model to use
         """
         self.model_name = model_name
+        
+        # Re-fetch API key to ensure latest settings
+        api_key = getattr(settings, 'GEMINI_API_KEY', None)
+        if not api_key:
+            import os
+            api_key = os.getenv("GEMINI_API_KEY")
+            
+        if not api_key:
+            logger.error("❌ GEMINI_API_KEY missing in settings and environment!")
+            self.model = None
+            return
+
+        # Log masked key for debugging
+        masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "INVALID"
+        logger.info(f"🔑 Configuring Gemini with key: {masked_key}")
+        
         try:
+            genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel(model_name)
             logger.info(f"✅ Gemini service initialized with model: {model_name}")
         except Exception as e:
