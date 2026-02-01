@@ -28,6 +28,9 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(default=None, max_length=100)
     avatar_url: Optional[str] = Field(default=None, max_length=500)
     daily_learning_goal: Optional[int] = Field(default=None, ge=5, le=120)
+    learning_target: Optional[str] = Field(default=None, max_length=100)
+    preferred_practice_time: Optional[str] = Field(default=None, max_length=100)
+    target_level: Optional[str] = Field(default=None, max_length=10)
 
 
 class UserStatsResponse(BaseModel):
@@ -62,8 +65,22 @@ def read_users(
 
 
 @router.get("/users/me", response_model=UserResponse)
-def read_users_me(current_user: User = Depends(get_current_user)):
+def read_users_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Get current authenticated user's profile."""
+    # Fetch target level from LearningPath
+    from app.models.proficiency import LearningPath
+    path = db.query(LearningPath).filter(LearningPath.user_id == current_user.user_id).first()
+    
+    # We can attach arbitrary attributes to the SQLAlchmey model instance
+    # if we are careful, or better, convert to dict. Pydantic from_attributes handles objects.
+    if path:
+        current_user.target_level = path.target_level
+    else:
+        current_user.target_level = None
+        
     return current_user
 
 
@@ -81,10 +98,40 @@ def update_user_me(
         current_user.avatar_url = user_update.avatar_url
     if user_update.daily_learning_goal is not None:
         current_user.daily_learning_goal = user_update.daily_learning_goal
+    if user_update.learning_target is not None:
+        current_user.learning_target = user_update.learning_target
+    if user_update.preferred_practice_time is not None:
+        current_user.preferred_practice_time = user_update.preferred_practice_time
+    
+    target_level_response = None
+    if user_update.target_level is not None:
+        from app.models.proficiency import LearningPath
+        path = db.query(LearningPath).filter(LearningPath.user_id == current_user.user_id).first()
+        if path:
+            path.target_level = user_update.target_level
+            db.add(path)
+            target_level_response = user_update.target_level
+        else:
+            # Create a path if it doesn't exist (assuming default A1 curr level)
+            new_path = LearningPath(
+                user_id=current_user.user_id,
+                current_level="A1",
+                target_level=user_update.target_level
+            )
+            db.add(new_path)
+            target_level_response = user_update.target_level
+    else:
+        # Fetch existing if not updating
+        from app.models.proficiency import LearningPath
+        path = db.query(LearningPath).filter(LearningPath.user_id == current_user.user_id).first()
+        if path:
+            target_level_response = path.target_level
     
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
+    
+    current_user.target_level = target_level_response
     return current_user
 
 
