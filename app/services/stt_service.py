@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 SUPPORTED_FORMATS = {"wav", "mp3", "webm", "ogg", "flac", "m4a"}
 
 # Get API configuration
-STT_PROVIDER = getattr(settings, 'STT_PROVIDER', 'mock')  # mock, google, whisper
+STT_PROVIDER = getattr(settings, 'STT_PROVIDER', 'gemini' if getattr(settings, 'GEMINI_API_KEY', None) else 'mock')  # mock, google, whisper, gemini
 GOOGLE_CLOUD_KEY = getattr(settings, 'GOOGLE_CLOUD_API_KEY', None)
 
 
@@ -82,6 +82,7 @@ class STTService:
     - mock: Returns mock transcription (development)
     - google: Google Cloud Speech-to-Text
     - whisper: OpenAI Whisper API
+    - gemini: Google Gemini (uses GEMINI_API_KEY)
     """
     
     def __init__(self, provider: str = STT_PROVIDER):
@@ -149,7 +150,81 @@ class STTService:
             return await self._transcribe_google(audio_bytes, audio_format, sample_rate, language)
         elif self.provider == "whisper":
             return await self._transcribe_whisper(audio_bytes, audio_format, language)
+        elif self.provider == "gemini":
+            return await self._transcribe_gemini(audio_bytes, audio_format, language)
         else:
+            return await self._transcribe_mock(audio_bytes, language)
+    
+    async def _transcribe_gemini(
+        self,
+        audio_bytes: bytes,
+        audio_format: str,
+        language: str
+    ) -> TranscriptionResult:
+        """
+        Transcribe using Google Gemini.
+        """
+        try:
+            import google.generativeai as genai
+            
+            # Use Gemini 2.0 Flash for audio processing
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            
+            # Mapping format to mime type
+            mime_map = {
+                "wav": "audio/wav",
+                "mp3": "audio/mpeg",
+                "webm": "audio/webm",
+                "ogg": "audio/ogg",
+                "flac": "audio/flac",
+                "m4a": "audio/mp4",
+            }
+            mime_type = mime_map.get(audio_format.lower(), "audio/wav")
+            
+            # Check if bytes are empty
+            if not audio_bytes:
+                logger.warning("Empty audio bytes received")
+                return TranscriptionResult(text="", confidence=0.0, words=[], language=language)
+
+            # Define the transcription prompt
+            prompt = """Transcribe the audio exactly as spoken. 
+Return ONLY the transcribed text, nothing else. 
+Do not add any explanations, labels, or formatting."""
+
+            response = model.generate_content([
+                {
+                    "mime_type": mime_type,
+                    "data": audio_bytes
+                },
+                prompt
+            ])
+            
+            # Handle potential empty or blocked response
+            if not response or not response.candidates:
+                logger.warning("Gemini returned no candidates (blocked or empty)")
+                return TranscriptionResult(text="", confidence=0.0, words=[], language=language)
+
+            transcribed_text = response.text.strip()
+            
+            # Cleanup common AI prefixes if they appear despite instructions
+            for prefix in ["Transcription:", "Transcribed text:", "Text:"]:
+                if transcribed_text.startswith(prefix):
+                    transcribed_text = transcribed_text[len(prefix):].strip()
+
+            # Logging for debug
+            logger.info(f"🎤 Gemini STT: '{transcribed_text}'")
+            
+            return TranscriptionResult(
+                text=transcribed_text,
+                confidence=0.9 if transcribed_text else 0.0,
+                words=[], # Gemini doesn't return easy word timings without more complex prompting
+                language=language,
+                duration_seconds=len(audio_bytes) / 32000 # Rough estimate
+            )
+            
+        except Exception as e:
+            logger.error(f"Gemini STT error: {e}", exc_info=True)
+            # Fallback to mock on error
             return await self._transcribe_mock(audio_bytes, language)
     
     async def _transcribe_mock(
