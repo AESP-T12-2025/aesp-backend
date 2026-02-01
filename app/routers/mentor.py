@@ -45,6 +45,48 @@ def create_or_update_profile(
     db.refresh(mentor)
     return mentor
 
+
+@router.get("/mentors/me/stats")
+def get_mentor_stats(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Get mentor's dashboard statistics: total sessions, avg rating, unique learners"""
+    from sqlalchemy import func, distinct
+    from app.models.mentor import MentorAssessment
+    
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        return {"total_sessions": 0, "avg_rating": 0.0, "unique_learners": 0}
+    
+    # Total COMPLETED bookings
+    total_sessions = db.query(func.count(Booking.booking_id)).join(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id,
+        Booking.status == "COMPLETED"
+    ).scalar() or 0
+    
+    # Average rating from assessments
+    assessments = db.query(MentorAssessment).join(Booking).join(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id,
+        MentorAssessment.score.isnot(None)
+    ).all()
+    
+    avg_rating = 0.0
+    if assessments:
+        total_score = sum(a.score for a in assessments if a.score)
+        avg_rating = round(total_score / len(assessments), 1) if assessments else 0.0
+    
+    # Unique learners
+    unique_learners = db.query(func.count(distinct(Booking.learner_id))).join(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id
+    ).scalar() or 0
+    
+    return {
+        "total_sessions": total_sessions,
+        "avg_rating": avg_rating,
+        "unique_learners": unique_learners
+    }
+
 @router.get("/mentors", response_model=List[MentorResponse])
 def get_mentors(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
     # Only return VERIFIED mentors to learners (PENDING requires Admin approval)
@@ -134,12 +176,43 @@ def get_my_bookings(
     Get all bookings for the current mentor.
     Uses get_current_mentor dependency which auto-creates profile if needed.
     """
-    # Get Bookings via Slots (mentor is guaranteed to exist)
-    bookings = db.query(Booking).join(AvailabilitySlot).filter(
+    from app.models.mentor import MentorAssessment
+    
+    # Get Bookings via Slots with assessment info (mentor is guaranteed to exist)
+    bookings = db.query(Booking).join(AvailabilitySlot).options(
+        joinedload(Booking.assessment),
+        joinedload(Booking.learner),
+        joinedload(Booking.slot)
+    ).filter(
         AvailabilitySlot.mentor_id == mentor.mentor_id
     ).all()
     
-    return bookings
+    # Return enriched data
+    result = []
+    for b in bookings:
+        result.append({
+            "booking_id": b.booking_id,
+            "slot_id": b.slot_id,
+            "learner_id": b.learner_id,
+            "status": b.status,
+            "meeting_link": b.meeting_link,  # Include meeting link
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+            "slot": {
+                "start_time": b.slot.start_time.isoformat() if b.slot and b.slot.start_time else None,
+                "end_time": b.slot.end_time.isoformat() if b.slot and b.slot.end_time else None
+            } if b.slot else None,
+            "learner": {
+                "full_name": b.learner.full_name if b.learner else None,
+                "email": b.learner.email if b.learner else None
+            } if b.learner else None,
+            "assessment": {
+                "assessment_id": b.assessment.assessment_id,
+                "score": b.assessment.score,
+                "feedback": b.assessment.feedback
+            } if b.assessment else None
+        })
+    
+    return result
 
 @router.post("/sessions/{booking_id}/feedback")
 def submit_session_feedback(
@@ -161,15 +234,227 @@ def submit_session_feedback(
     db.commit()
     return {"message": "Feedback submitted"}
 
+
+# =============================================================================
+# Booking Confirmation Flow (Mentor confirms + adds meeting link)
+# =============================================================================
+
+class BookingConfirmRequest(BaseModel):
+    meeting_link: str  # Google Meet / Zoom link
+
+@router.post("/bookings/{booking_id}/confirm")
+def confirm_booking(
+    booking_id: int,
+    data: BookingConfirmRequest,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Mentor confirms a booking and provides meeting link.
+    Changes status: PENDING -> CONFIRMED
+    """
+    # Verify user is a mentor
+    user_role = str(current_user.role).upper() if current_user.role else ""
+    if "MENTOR" not in user_role:
+        raise HTTPException(403, "Only mentors can confirm bookings")
+    
+    # Get booking
+    booking = db.query(Booking).options(
+        joinedload(Booking.slot)
+    ).filter(Booking.booking_id == booking_id).first()
+    
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    
+    # Verify mentor owns this slot
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor or (booking.slot and booking.slot.mentor_id != mentor.mentor_id):
+        raise HTTPException(403, "You don't own this booking")
+    
+    # Validate meeting link
+    if not data.meeting_link or len(data.meeting_link) < 10:
+        raise HTTPException(400, "Please provide a valid meeting link")
+    
+    # Update booking
+    booking.status = "CONFIRMED"
+    booking.meeting_link = data.meeting_link
+    db.commit()
+    
+    # TODO: Send notification to learner with meeting link
+    
+    return {
+        "message": "Booking confirmed successfully",
+        "booking_id": booking_id,
+        "meeting_link": data.meeting_link,
+        "status": "CONFIRMED"
+    }
+
+
+@router.post("/bookings/{booking_id}/complete")
+def complete_booking(
+    booking_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Mentor marks a session as completed after the meeting.
+    Changes status: CONFIRMED -> COMPLETED
+    """
+    # Verify user is a mentor
+    user_role = str(current_user.role).upper() if current_user.role else ""
+    if "MENTOR" not in user_role:
+        raise HTTPException(403, "Only mentors can complete sessions")
+    
+    # Get booking
+    booking = db.query(Booking).options(
+        joinedload(Booking.slot)
+    ).filter(Booking.booking_id == booking_id).first()
+    
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    
+    # Verify mentor owns this slot
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor or (booking.slot and booking.slot.mentor_id != mentor.mentor_id):
+        raise HTTPException(403, "You don't own this booking")
+    
+    if booking.status != "CONFIRMED":
+        raise HTTPException(400, f"Cannot complete booking with status: {booking.status}")
+    
+    # Update booking
+    booking.status = "COMPLETED"
+    db.commit()
+    
+    return {
+        "message": "Session marked as completed",
+        "booking_id": booking_id,
+        "status": "COMPLETED"
+    }
+
+
+# --- Mentor's Learners (from bookings) ---
+
+@router.get("/mentor/my-learners")
+def get_my_learners(
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Get all unique learners who have booked with this mentor"""
+    from sqlalchemy import distinct
+    
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        return []
+    
+    # Get unique learner_ids from bookings
+    learner_ids = db.query(distinct(Booking.learner_id)).join(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id
+    ).all()
+    
+    learner_ids = [lid[0] for lid in learner_ids]
+    
+    if not learner_ids:
+        return []
+    
+    learners = db.query(User).filter(User.user_id.in_(learner_ids)).all()
+    
+    return [
+        {
+            "user_id": l.user_id,
+            "full_name": l.full_name,
+            "email": l.email
+        }
+        for l in learners
+    ]
+
+
+class ShareTopicsRequest(BaseModel):
+    topic_ids: List[int]
+    learner_ids: List[int]
+
+
+@router.post("/mentor/share-topics")
+def share_topics_with_learners(
+    data: ShareTopicsRequest,
+    db: Session = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """Share selected topics with selected learners, create notifications"""
+    from app.models.content import Topic
+    from app.models.notification import Notification
+    
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    if not mentor:
+        raise HTTPException(403, "Not a mentor")
+    
+    # Validate learners are from mentor's bookings
+    valid_learner_ids = db.query(Booking.learner_id).join(AvailabilitySlot).filter(
+        AvailabilitySlot.mentor_id == mentor.mentor_id,
+        Booking.learner_id.in_(data.learner_ids)
+    ).distinct().all()
+    valid_learner_ids = [lid[0] for lid in valid_learner_ids]
+    
+    if not valid_learner_ids:
+        raise HTTPException(400, "No valid learners found")
+    
+    # Get topic names
+    topics = db.query(Topic).filter(Topic.topic_id.in_(data.topic_ids)).all()
+    topic_names = ", ".join([t.name for t in topics[:3]])
+    if len(topics) > 3:
+        topic_names += f" (+{len(topics) - 3} khác)"
+    
+    # Create notifications for each learner
+    import json
+    topic_ids_json = json.dumps(data.topic_ids)
+    
+    created_count = 0
+    for learner_id in valid_learner_ids:
+        try:
+            notification = Notification(
+                user_id=learner_id,
+                title="📚 Mentor chia sẻ chủ đề mới",
+                message=f"Mentor {mentor.full_name or current_user.full_name} đã chia sẻ chủ đề: {topic_names}",
+                type="TOPIC_SHARED",
+                extra_data=topic_ids_json,
+                is_read=False
+            )
+            db.add(notification)
+            created_count += 1
+        except Exception as e:
+            print(f"Error creating notification: {e}")
+    
+    db.commit()
+    
+    return {
+        "message": f"Đã chia sẻ {len(topics)} chủ đề với {created_count} học viên",
+        "topics_shared": len(topics),
+        "learners_notified": created_count
+    }
+
 # --- Mentor Assessments for Learners ---
 from pydantic import BaseModel as PydanticBase
 from typing import Optional
 
 class AssessmentCreate(PydanticBase):
     booking_id: int
-    score: int  # 1-10
-    feedback: str
+    score: int  # Overall score 1-10
+    feedback: str  # General feedback
     level_assigned: Optional[str] = None  # A1, A2, B1, B2, C1, C2
+    
+    # Detailed scores (1-10)
+    pronunciation_score: Optional[int] = None
+    grammar_score: Optional[int] = None
+    vocabulary_score: Optional[int] = None
+    fluency_score: Optional[int] = None
+    
+    # Detailed notes
+    pronunciation_notes: Optional[str] = None  # Pronunciation errors & tips
+    grammar_notes: Optional[str] = None  # Grammar corrections
+    vocabulary_tips: Optional[str] = None  # Vocabulary, collocations, idioms suggestions
+    communication_tips: Optional[str] = None  # How to express more clearly
+    
+    # Shared resources
+    shared_resource_ids: Optional[str] = None  # Comma-separated resource IDs
 
 @router.post("/mentor/assessments")
 def create_assessment(
@@ -187,13 +472,35 @@ def create_assessment(
     # Create or update assessment
     assessment = db.query(MentorAssessment).filter(MentorAssessment.booking_id == data.booking_id).first()
     if assessment:
+        # Update existing
         assessment.score = data.score
         assessment.feedback = data.feedback
+        assessment.level_assigned = data.level_assigned
+        assessment.pronunciation_score = data.pronunciation_score
+        assessment.grammar_score = data.grammar_score
+        assessment.vocabulary_score = data.vocabulary_score
+        assessment.fluency_score = data.fluency_score
+        assessment.pronunciation_notes = data.pronunciation_notes
+        assessment.grammar_notes = data.grammar_notes
+        assessment.vocabulary_tips = data.vocabulary_tips
+        assessment.communication_tips = data.communication_tips
+        assessment.shared_resource_ids = data.shared_resource_ids
     else:
+        # Create new
         assessment = MentorAssessment(
             booking_id=data.booking_id,
             score=data.score,
-            feedback=data.feedback
+            feedback=data.feedback,
+            level_assigned=data.level_assigned,
+            pronunciation_score=data.pronunciation_score,
+            grammar_score=data.grammar_score,
+            vocabulary_score=data.vocabulary_score,
+            fluency_score=data.fluency_score,
+            pronunciation_notes=data.pronunciation_notes,
+            grammar_notes=data.grammar_notes,
+            vocabulary_tips=data.vocabulary_tips,
+            communication_tips=data.communication_tips,
+            shared_resource_ids=data.shared_resource_ids
         )
         db.add(assessment)
     
@@ -207,7 +514,17 @@ def create_assessment(
         if path:
             path.current_level = data.level_assigned
         else:
-            path = LearningPath(user_id=booking.learner_id, current_level=data.level_assigned)
+            # Determine a reasonable target_level based on current level
+            level_order = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+            current_idx = level_order.index(data.level_assigned) if data.level_assigned in level_order else 0
+            target_idx = min(current_idx + 1, len(level_order) - 1)
+            target = level_order[target_idx]
+            
+            path = LearningPath(
+                user_id=booking.learner_id,
+                current_level=data.level_assigned,
+                target_level=target
+            )
             db.add(path)
     
     db.commit()

@@ -586,3 +586,134 @@ def get_my_purchases(
         }
         for t in transactions
     ]
+
+
+# =============================================================================
+# Learner Bookings with Mentor Assessment
+# =============================================================================
+
+@router.get("/my-bookings")
+def get_my_bookings_as_learner(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get learner's bookings with mentor, meeting link, and assessment.
+    """
+    from app.models.mentor import Booking, MentorAssessment
+    from app.models.mentor_review import MentorResource
+    from sqlalchemy.orm import joinedload
+    
+    bookings = db.query(Booking).filter(
+        Booking.learner_id == current_user.user_id
+    ).options(
+        joinedload(Booking.slot),
+        joinedload(Booking.assessment)
+    ).order_by(Booking.created_at.desc()).all()
+    
+    result = []
+    for b in bookings:
+        assessment_data = None
+        shared_resources = []
+        
+        if b.assessment:
+            # Get shared resources if any
+            if b.assessment.shared_resource_ids:
+                try:
+                    resource_ids = [int(rid) for rid in b.assessment.shared_resource_ids.split(',') if rid]
+                    resources = db.query(MentorResource).filter(
+                        MentorResource.resource_id.in_(resource_ids)
+                    ).all()
+                    shared_resources = [
+                        {
+                            "resource_id": r.resource_id,
+                            "title": r.title,
+                            "description": r.description,
+                            "resource_type": r.resource_type,
+                            "file_url": r.file_url
+                        }
+                        for r in resources
+                    ]
+                except:
+                    pass
+            
+            assessment_data = {
+                "assessment_id": b.assessment.assessment_id,
+                "score": b.assessment.score,
+                "feedback": b.assessment.feedback,
+                "level_assigned": b.assessment.level_assigned,
+                "pronunciation_score": b.assessment.pronunciation_score,
+                "grammar_score": b.assessment.grammar_score,
+                "vocabulary_score": b.assessment.vocabulary_score,
+                "fluency_score": b.assessment.fluency_score,
+                "pronunciation_notes": b.assessment.pronunciation_notes,
+                "grammar_notes": b.assessment.grammar_notes,
+                "vocabulary_tips": b.assessment.vocabulary_tips,
+                "communication_tips": b.assessment.communication_tips,
+                "shared_resources": shared_resources
+            }
+        
+        result.append({
+            "booking_id": b.booking_id,
+            "slot_id": b.slot_id,
+            "learner_id": b.learner_id,
+            "status": b.status,
+            "meeting_link": b.meeting_link,
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+            "slot": {
+                "start_time": b.slot.start_time.isoformat() if b.slot and b.slot.start_time else None,
+                "end_time": b.slot.end_time.isoformat() if b.slot and b.slot.end_time else None
+            } if b.slot else None,
+            "assessment": assessment_data
+        })
+    
+    return result
+
+
+@router.get("/shared-topics")
+def get_shared_topics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get topics shared by mentors via notifications.
+    Returns topic details from TOPIC_SHARED notifications.
+    """
+    import json
+    from app.models.notification import Notification
+    from app.models.content import Topic
+    
+    # Get all TOPIC_SHARED notifications for this user
+    notifications = db.query(Notification).filter(
+        Notification.user_id == current_user.user_id,
+        Notification.type == "TOPIC_SHARED"
+    ).order_by(Notification.created_at.desc()).all()
+    
+    result = []
+    seen_topic_ids = set()
+    
+    for notif in notifications:
+        if not notif.extra_data:
+            continue
+        try:
+            topic_ids = json.loads(notif.extra_data)
+            for tid in topic_ids:
+                if tid in seen_topic_ids:
+                    continue
+                seen_topic_ids.add(tid)
+                
+                topic = db.query(Topic).filter(Topic.topic_id == tid).first()
+                if topic:
+                    result.append({
+                        "topic_id": topic.topic_id,
+                        "name": topic.name,
+                        "description": topic.description,
+                        "difficulty_level": "GENERAL", # Topic model doesn't have difficulty_level
+                        "industry": topic.industry,
+                        "shared_at": notif.created_at.isoformat() if notif.created_at else None,
+                        "mentor_message": notif.message
+                    })
+        except:
+            continue
+    
+    return result

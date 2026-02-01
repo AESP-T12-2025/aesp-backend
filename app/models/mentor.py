@@ -42,19 +42,45 @@ class Booking(Base):
     slot_id = Column(Integer, ForeignKey("availability_slots.slot_id"), nullable=False, unique=True, index=True)
     learner_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    status = Column(String, default="CONFIRMED")
+    status = Column(String, default="PENDING")  # PENDING -> CONFIRMED -> COMPLETED
+    meeting_link = Column(String, nullable=True)  # Google Meet/Zoom link from mentor
 
     slot = relationship("AvailabilitySlot", back_populates="booking")
     learner = relationship("app.models.user.User", foreign_keys=[learner_id])
     assessment = relationship("MentorAssessment", back_populates="booking", uselist=False)
 
 class MentorAssessment(Base):
+    """
+    Consolidated post-session assessment from Mentor.
+    Covers: pronunciation, grammar, vocabulary, fluency, and overall feedback.
+    """
     __tablename__ = "mentor_assessments"
 
     assessment_id = Column(Integer, primary_key=True, index=True)
     booking_id = Column(Integer, ForeignKey("bookings.booking_id"), nullable=False, index=True)
+    
+    # Overall Score (1-10)
     score = Column(Integer, nullable=True)
-    feedback = Column(Text, nullable=True)
+    
+    # Detailed Scores (1-10 each)
+    pronunciation_score = Column(Integer, nullable=True)
+    grammar_score = Column(Integer, nullable=True)
+    vocabulary_score = Column(Integer, nullable=True)
+    fluency_score = Column(Integer, nullable=True)
+    
+    # Level Assignment (A1, A2, B1, B2, C1, C2)
+    level_assigned = Column(String(10), nullable=True)
+    
+    # Detailed Feedback / Notes
+    feedback = Column(Text, nullable=True)  # General feedback
+    pronunciation_notes = Column(Text, nullable=True)  # Pronunciation errors & tips
+    grammar_notes = Column(Text, nullable=True)  # Grammar corrections
+    vocabulary_tips = Column(Text, nullable=True)  # Vocabulary, collocations, idioms
+    communication_tips = Column(Text, nullable=True)  # How to express more clearly
+    
+    # Shared Resources (JSON or comma-separated resource IDs)
+    shared_resource_ids = Column(String, nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     booking = relationship("Booking", back_populates="assessment")
