@@ -96,10 +96,22 @@ def create_slot(
     db: Session = Depends(database.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    # Check if user is a mentor
+    # Check role
+    user_role = str(current_user.role).upper() if current_user.role else ""
+    if "MENTOR" not in user_role:
+        raise HTTPException(status_code=403, detail="Only mentors can create slots")
+    
+    # Get or create mentor profile
     mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
     if not mentor:
-         raise HTTPException(status_code=400, detail="User is not a registered mentor")
+        mentor = Mentor(
+            user_id=current_user.user_id,
+            full_name=current_user.full_name or "Mentor",
+            verification_status="PENDING"
+        )
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
 
     new_slot = AvailabilitySlot(
         mentor_id=mentor.mentor_id,
@@ -496,16 +508,17 @@ def create_mentor_resource(
     if "MENTOR" not in user_role:
         raise HTTPException(403, "Only mentors can create resources")
     
-    # Validate resource type
-    allowed_types = ["document", "video", "link"]
-    if data.resource_type not in allowed_types:
+    # Validate resource type (normalize to lowercase)
+    allowed_types = ["document", "video", "link", "audio"]
+    resource_type_normalized = data.resource_type.lower()
+    if resource_type_normalized not in allowed_types:
         raise HTTPException(400, f"Invalid resource type. Allowed types: {', '.join(allowed_types)}")
     
     resource = MentorResource(
         mentor_id=current_user.user_id,
         title=data.title,
         description=data.description,
-        resource_type=data.resource_type,
+        resource_type=resource_type_normalized,
         file_url=data.file_url,
         is_public=data.is_public
     )
