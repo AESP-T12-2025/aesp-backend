@@ -8,10 +8,11 @@ def test():
     key = os.getenv("GEMINI_API_KEY")
     print(f"Testing key: {key[:10]}...")
     genai.configure(api_key=key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # Using the confirmed available model
+    model = genai.GenerativeModel('gemini-2.0-flash')
     try:
-        response = model.generate_content("Say: KEY IS WORKING")
-        print(f"SUCCESS: {response.text.strip()}")
+        response = model.generate_content("Say: SUCCESS")
+        print(f"RESULT: {response.text.strip()}")
     except Exception as e:
         print(f"FAILURE: {e}")
 

@@ -46,7 +46,7 @@ class GeminiService:
         - Speech analysis with detailed feedback
     """
     
-    def __init__(self, model_name: str = "gemini-1.5-flash"):
+    def __init__(self, model_name: str = "gemini-2.0-flash"):
         """
         Initialize Gemini service.
         
@@ -114,9 +114,10 @@ INSTRUCTIONS:
             
         except Exception as e:
             logger.error(f"Gemini chat error: {e}", exc_info=True)
-            if "exhausted" in str(e).lower() or "429" in str(e):
-                return "AI_ERROR_QUOTA: I'm processing too many requests. Please wait a moment."
-            return "AI_ERROR_GENERAL: I'm having a bit of trouble thinking right now. What were you saying?"
+            error_msg = str(e).lower()
+            if "exhausted" in error_msg or "429" in error_msg or "quota" in error_msg:
+                return "QUOTA_LIMIT: Phía Google đang giới hạn số lượt trả lời của tài khoản này. Vui lòng đợi 30 giây rồi nhắn lại nhé!"
+            return "AI_ERROR: Rất tiếc, mình chưa thể trả lời lúc này. Bạn hãy thử nhắn lại sau vài giây hoặc kiểm tra lại kết nối nhé!"
 
     async def generate_response_suggestion(
         self, 

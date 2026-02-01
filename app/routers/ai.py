@@ -115,7 +115,7 @@ async def conversation(
         scenario = db.query(Scenario).filter(Scenario.scenario_id == request.scenario_id).first()
         
         scenario_title = scenario.title if scenario else "English Practice"
-        scenario_desc = scenario.description if scenario else "General English conversation practice"
+        scenario_desc = scenario.topic.description if (scenario and scenario.topic) else "General English conversation practice"
         difficulty = scenario.difficulty_level if scenario else "Any"
 
         # Build conversation context from history
@@ -157,8 +157,8 @@ Recent history:
         logger.error(f"Critical conversation error: {e}", exc_info=True)
         # Always return a valid response object to the frontend
         return {
-            "response": "I see! That's quite interesting. (Note: System is currently busy, let's keep practicing!) What else would you like to talk about?",
-            "scenario_title": scenario_title,
+            "response": "That's a great point! I'm listening. Could you tell me more about that? (Hệ thống đang bận, hãy thử lại sau giây lát)",
+            "scenario_title": scenario_title if 'scenario_title' in locals() else "English Practice",
             "fallback": True,
             "success": False
         }
