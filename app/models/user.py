@@ -20,8 +20,8 @@ class User(Base):
     password_hash = Column(String, nullable=True) # Nullable for Google Auth
     full_name = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
-    role = Column(SqlEnum(UserRole), default=UserRole.LEARNER)
-    auth_provider = Column(SqlEnum(AuthProvider), default=AuthProvider.LOCAL)
+    role = Column(SqlEnum(UserRole, name="user_role"), default=UserRole.LEARNER)
+    auth_provider = Column(SqlEnum(AuthProvider, name="auth_provider"), default=AuthProvider.LOCAL)
     is_active = Column(Boolean, default=True)
     daily_learning_goal = Column(Integer, default=15) # Minutes/day
     learning_target = Column(String, default="General English")

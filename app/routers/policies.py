@@ -29,7 +29,7 @@ class PolicyResponse(BaseModel):
     last_updated: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- Public Endpoints ---
 @router.get("/", response_model=List[PolicyResponse])

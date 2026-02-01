@@ -252,6 +252,16 @@ def upgrade_subscription(
     if not package:
         raise HTTPException(status_code=404, detail="Package not found")
     
+    # Create Transaction for revenue tracking
+    new_txn = Transaction(
+        user_id=current_user.user_id,
+        package_id=package.id,
+        amount=package.price,
+        status=TransactionStatus.SUCCESS,
+        payment_method="SUBSCRIPTION_UPGRADE"
+    )
+    db.add(new_txn)
+    
     # Deactivate old subscriptions
     db.query(UserSubscription).filter(
         UserSubscription.user_id == current_user.user_id,
@@ -274,6 +284,7 @@ def upgrade_subscription(
     
     return {
         "message": "Subscription upgraded successfully",
+        "transaction_id": new_txn.id,
         "end_date": end_date.isoformat()
     }
 

@@ -180,3 +180,56 @@ def require_learner(current_user: User = Depends(get_current_user)) -> User:
         if role_value != "LEARNER":
             raise AuthorizationException(message="Learner privileges required")
     return current_user
+
+
+def get_current_mentor(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get current user's Mentor profile, auto-creating if needed.
+    
+    This dependency:
+    1. Checks if user has MENTOR role
+    2. Returns existing Mentor profile if found
+    3. Auto-creates Mentor profile with PENDING status if missing
+    
+    Args:
+        current_user: The authenticated user
+        db: Database session
+        
+    Returns:
+        The Mentor object (existing or newly created)
+        
+    Raises:
+        AuthorizationException: If user doesn't have MENTOR role
+    """
+    from app.models.mentor import Mentor
+    
+    # Check role
+    role_value = (
+        current_user.role.value 
+        if hasattr(current_user.role, 'value') 
+        else str(current_user.role)
+    )
+    if role_value != "MENTOR":
+        raise AuthorizationException(message="Mentor role required")
+    
+    # Find existing mentor profile
+    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
+    
+    if not mentor:
+        # Auto-create with PENDING status (requires Admin approval)
+        mentor = Mentor(
+            user_id=current_user.user_id,
+            full_name=current_user.full_name or "Mentor",
+            verification_status="PENDING",
+            bio="",
+            skills=""
+        )
+        db.add(mentor)
+        db.commit()
+        db.refresh(mentor)
+        logger.info(f"Auto-created Mentor profile for user {current_user.email}")
+    
+    return mentor

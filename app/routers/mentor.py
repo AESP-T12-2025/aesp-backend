@@ -47,7 +47,10 @@ def create_or_update_profile(
 
 @router.get("/mentors", response_model=List[MentorResponse])
 def get_mentors(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
-    mentors = db.query(Mentor).offset(skip).limit(limit).all()
+    # Only return VERIFIED mentors to learners (PENDING requires Admin approval)
+    mentors = db.query(Mentor).filter(
+        Mentor.verification_status == "VERIFIED"
+    ).offset(skip).limit(limit).all()
     return mentors
 
 # --- Booking System ---
@@ -124,16 +127,14 @@ def get_mentor_slots(
 
 @router.get("/mentors/me/bookings")
 def get_my_bookings(
-    db: Session = Depends(database.get_db),
-    current_user: User = Depends(deps.get_current_user)
+    mentor: Mentor = Depends(deps.get_current_mentor),  # Auto-creates profile if missing
+    db: Session = Depends(database.get_db)
 ):
-    # 1. Get Mentor ID
-    mentor = db.query(Mentor).filter(Mentor.user_id == current_user.user_id).first()
-    if not mentor:
-         raise HTTPException(400, "User is not a mentor")
-         
-    # 2. Get Bookings via Slots
-    # Join Booking -> Slot -> Mentor
+    """
+    Get all bookings for the current mentor.
+    Uses get_current_mentor dependency which auto-creates profile if needed.
+    """
+    # Get Bookings via Slots (mentor is guaranteed to exist)
     bookings = db.query(Booking).join(AvailabilitySlot).filter(
         AvailabilitySlot.mentor_id == mentor.mentor_id
     ).all()
@@ -262,7 +263,7 @@ class VocabSuggestionResponse(VocabSuggestionCreate):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 @router.post("/mentor/vocab-suggestions", response_model=VocabSuggestionResponse)
 def create_vocab_suggestion(

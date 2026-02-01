@@ -8,6 +8,7 @@ class ModerationStatus(str, enum.Enum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    REPORTED = "REPORTED"  # When learners report the post
 
 class MentorPost(Base):
     __tablename__ = "mentor_posts"

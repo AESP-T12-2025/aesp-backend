@@ -343,7 +343,7 @@ def get_revenue_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Issue #34: Get revenue statistics."""
+    """Issue #34: Get revenue statistics with daily breakdown."""
     require_admin(current_user)
     
     total = db.query(func.sum(Transaction.amount)).scalar() or 0
@@ -357,11 +357,27 @@ def get_revenue_stats(
         Transaction.created_at >= last_week
     ).scalar() or 0
     
+    # Daily breakdown for last 7 days
+    daily_breakdown = []
+    for i in range(6, -1, -1):  # 6 days ago to today
+        day_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=i)
+        day_end = day_start + timedelta(days=1)
+        day_revenue = db.query(func.sum(Transaction.amount)).filter(
+            Transaction.created_at >= day_start,
+            Transaction.created_at < day_end
+        ).scalar() or 0
+        daily_breakdown.append({
+            "date": day_start.strftime("%d/%m"),
+            "day_name": ["CN", "T2", "T3", "T4", "T5", "T6", "T7"][day_start.weekday() + 1 if day_start.weekday() < 6 else 0],
+            "revenue": float(day_revenue)
+        })
+    
     return {
         "total": float(total),
         "revenue": float(total),
         "monthly_revenue": float(monthly),
-        "weekly_revenue": float(weekly)
+        "weekly_revenue": float(weekly),
+        "daily_breakdown": daily_breakdown
     }
 
 
@@ -574,6 +590,51 @@ def toggle_user_status(
         "user_id": user_id,
         "is_active": user.is_active,
         "message": f"User {'activated' if user.is_active else 'deactivated'} successfully"
+    }
+
+
+@router.put("/users/{user_id}/role")
+def change_user_role(
+    user_id: int,
+    new_role: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Change a user's role (e.g., LEARNER -> MENTOR)."""
+    require_admin(current_user)
+    
+    # Validate new_role
+    valid_roles = ["ADMIN", "MENTOR", "LEARNER"]
+    if new_role.upper() not in valid_roles:
+        raise HTTPException(400, f"Invalid role. Must be one of: {valid_roles}")
+    
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    
+    old_role = str(user.role.value) if hasattr(user.role, 'value') else str(user.role)
+    user.role = UserRole[new_role.upper()]
+    
+    # Auto-create Mentor profile if promoting to MENTOR
+    if new_role.upper() == "MENTOR":
+        existing_mentor = db.query(Mentor).filter(Mentor.user_id == user_id).first()
+        if not existing_mentor:
+            mentor = Mentor(
+                user_id=user_id,
+                full_name=user.full_name or "Mentor",
+                verification_status="PENDING",
+                bio="",
+                skills=""
+            )
+            db.add(mentor)
+    
+    db.commit()
+    
+    return {
+        "user_id": user_id,
+        "old_role": old_role,
+        "new_role": new_role.upper(),
+        "message": f"User role changed from {old_role} to {new_role.upper()}"
     }
 
 

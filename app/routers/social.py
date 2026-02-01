@@ -105,7 +105,7 @@ def create_mentor_post(
     )
 
 
-@router.get("/posts", response_model=List[PostResponse])
+@router.get("/posts")
 def get_community_feed(db: Session = Depends(get_db)):
     """
     Get community feed with approved posts.
@@ -117,17 +117,44 @@ def get_community_feed(db: Session = Depends(get_db)):
     ).order_by(MentorPost.created_at.desc()).all()
 
     return [
-        PostResponse(
-            id=p.id,
-            mentor_id=p.mentor_id,
-            mentor_name=p.mentor.full_name if p.mentor else "Unknown",
-            content=p.content,
-            image_url=p.image_url,
-            like_count=len(p.likes) if p.likes else 0,
-            comment_count=len(p.comments) if p.comments else 0,
-            created_at=p.created_at
-        )
+        {
+            "id": p.id,
+            "mentor_id": p.mentor_id,
+            "mentor_name": p.mentor.full_name if p.mentor else "Unknown",
+            "content": p.content,
+            "image_url": p.image_url,
+            "like_count": len(p.likes) if p.likes else 0,
+            "comment_count": len(p.comments) if p.comments else 0,
+            "created_at": p.created_at,
+            "is_liked": False  # Will be updated via separate check if needed
+        }
         for p in posts
+    ]
+
+
+@router.get("/posts/{post_id}/comments")
+def get_comments(
+    post_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get all comments for a post."""
+    post = db.query(MentorPost).filter(MentorPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    comments = db.query(PostComment).filter(PostComment.post_id == post_id).order_by(PostComment.created_at.asc()).all()
+    
+    return [
+        {
+            "id": c.id,
+            "comment_id": c.id,
+            "post_id": c.post_id,
+            "user_id": c.user_id,
+            "user_name": c.user.full_name if c.user else "Ẩn danh",
+            "content": c.content,
+            "created_at": c.created_at
+        }
+        for c in comments
     ]
 
 
@@ -150,8 +177,17 @@ def add_comment(
     )
     db.add(new_comment)
     db.commit()
+    db.refresh(new_comment)
     
-    return {"message": "Comment added successfully"}
+    return {
+        "id": new_comment.id,
+        "comment_id": new_comment.id,
+        "user_id": new_comment.user_id,
+        "user_name": current_user.full_name or "Ẩn danh",
+        "content": new_comment.content,
+        "created_at": new_comment.created_at,
+        "message": "Comment added successfully"
+    }
 
 
 @router.post("/posts/{post_id}/like")
@@ -179,6 +215,32 @@ def toggle_like(
         db.add(new_like)
         db.commit()
         return {"message": "Liked", "liked": True}
+
+
+@router.post("/posts/{post_id}/report")
+def report_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Report a post for moderation.
+    
+    When a learner reports a post, it changes status to REPORTED
+    so Admin can review it in the moderation panel.
+    """
+    post = db.query(MentorPost).filter(MentorPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    # Only change to REPORTED if currently APPROVED
+    if post.moderation_status == ModerationStatus.APPROVED:
+        post.moderation_status = ModerationStatus.REPORTED
+        db.commit()
+        logger.info(f"Post {post_id} reported by user {current_user.user_id}")
+        return {"message": "Báo cáo thành công. Admin sẽ xem xét bài viết này."}
+    
+    return {"message": "Bài viết đã được báo cáo trước đó."}
 
 
 # =============================================================================

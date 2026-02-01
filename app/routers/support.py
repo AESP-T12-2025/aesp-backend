@@ -34,7 +34,7 @@ class TicketResponse(BaseModel):
 
 # Endpoints
 
-@router.post("/", response_model=TicketResponse)
+@router.post("", response_model=TicketResponse)
 def create_ticket(
     ticket: TicketCreate,
     db: Session = Depends(get_db),
@@ -51,7 +51,7 @@ def create_ticket(
     db.refresh(new_ticket)
     return new_ticket
 
-@router.get("/", response_model=List[TicketResponse])
+@router.get("", response_model=List[TicketResponse])
 def get_tickets(
     status: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -190,6 +190,18 @@ def admin_update_ticket_status(
     
     db.commit()
     db.refresh(ticket)
+    
+    # Notify user about status update
+    from app.models.notification import Notification
+    notification = Notification(
+        user_id=ticket.user_id,
+        title="Báo cáo hỗ trợ được cập nhật",
+        message=f"Ticket #{ticket.ticket_id} ('{ticket.title}') đã chuyển sang trạng thái: {ticket.status}",
+        type="SYSTEM"
+    )
+    db.add(notification)
+    db.commit()
+    
     return ticket
 
 @admin_support_router.get("/tickets/{ticket_id}", response_model=TicketResponse)

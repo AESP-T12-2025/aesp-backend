@@ -17,7 +17,7 @@ class ChallengeResponse(BaseModel):
     points_reward: int
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class LeaderboardEntry(BaseModel):
     user_name: str
