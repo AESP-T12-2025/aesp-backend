@@ -30,7 +30,7 @@ from app.routers import (
     upload, auth, content, users, payment, ai, mentor,
     social, gamification, mentor_review, proficiency, vocab,
     support, notification, peer, admin, analytics, policies,
-    images, learner, vocabulary
+    images, learner, vocabulary, peer_chat
 )
 
 # Import all models to register them with SQLAlchemy
@@ -161,6 +161,7 @@ app.include_router(mentor_review.session_router, tags=["Mentor Sessions"])
 # Social routers
 app.include_router(social.router, tags=["Social"])
 app.include_router(peer.router, tags=["Peer Practice"])
+app.include_router(peer_chat.router, tags=["Peer Chat WebSocket"])
 
 # Gamification routers
 app.include_router(gamification.router, tags=["Gamification"])

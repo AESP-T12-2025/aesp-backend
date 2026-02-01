@@ -89,6 +89,76 @@ async def chat(request: ChatRequest):
     return {"reply": response}
 
 
+class ConversationMessage(BaseModel):
+    """Single message in conversation history."""
+    role: str = Field(..., description="'user' or 'ai'")
+    content: str
+
+
+class ConversationRequest(BaseModel):
+    """Request schema for scenario-based conversation."""
+    message: str = Field(..., min_length=1, max_length=2000)
+    scenario_id: int
+    context: list[ConversationMessage] = Field(default=[])
+
+
+@router.post("/conversation")
+async def conversation(
+    request: ConversationRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Have a conversation within a specific scenario context.
+    
+    - Loads scenario info to build appropriate AI persona
+    - Uses conversation history for coherent responses
+    - AI responds as a practice partner in English
+    """
+    # Load scenario for context
+    scenario = db.query(Scenario).filter(Scenario.scenario_id == request.scenario_id).first()
+    
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    # Build conversation context
+    history_text = ""
+    for msg in request.context[-6:]:  # Last 6 messages for context
+        role = "User" if msg.role == "user" else "AI"
+        history_text += f"{role}: {msg.content}\n"
+    
+    # Build system prompt
+    system_context = f"""You are an English conversation practice partner. 
+The learner is practicing the scenario: "{scenario.title}".
+Scenario description: {scenario.description or 'General English practice'}
+Difficulty level: {scenario.difficulty_level}
+
+Your role:
+- Respond naturally in English
+- Keep responses conversational and encouraging
+- If the learner makes grammar mistakes, gently correct them
+- Ask follow-up questions to keep the conversation going
+- Match the difficulty level ({scenario.difficulty_level})
+
+Recent conversation:
+{history_text}
+
+Now respond to the user's latest message naturally."""
+
+    try:
+        response = await ai_service.chat_with_context(
+            request.message,
+            system_context
+        )
+        return {"response": response, "scenario_title": scenario.title}
+    except Exception as e:
+        logger.error(f"Conversation error: {e}")
+        return {
+            "response": "I understand! That's a great point. Let me think about that... What else would you like to discuss about this topic?",
+            "scenario_title": scenario.title,
+            "fallback": True
+        }
+
+
 @router.post("/suggest-reply")
 async def suggest_reply(request: SuggestionRequest):
     """
