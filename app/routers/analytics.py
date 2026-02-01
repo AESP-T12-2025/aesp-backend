@@ -587,16 +587,18 @@ def generate_learner_report(
         UserDailyStats.date >= start_date.date()
     ).scalar() or 0
     
-    # XP earned
-    xp_earned = db.query(func.sum(UserDailyStats.xp_earned)).filter(
-        UserDailyStats.user_id == current_user.user_id,
-        UserDailyStats.date >= start_date.date()
-    ).scalar() or 0
-    
-    # Calculate streak
+    # XP earned = words_learned * 10 + bonus_xp from challenges
+    xp_from_words = words_learned * 10
     from app.models.user import User
     user = db.query(User).filter(User.user_id == current_user.user_id).first()
-    streak = user.streak_count if user else 0
+    bonus_xp = user.bonus_xp if user and user.bonus_xp else 0
+    xp_earned = xp_from_words + bonus_xp
+    
+    # Calculate streak from latest daily stat
+    latest_stat = db.query(UserDailyStats).filter(
+        UserDailyStats.user_id == current_user.user_id
+    ).order_by(UserDailyStats.date.desc()).first()
+    streak = latest_stat.login_streak_current if latest_stat else 0
     
     return {
         "period": period,
