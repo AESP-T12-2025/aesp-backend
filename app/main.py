@@ -116,6 +116,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 # SECURITY: Restrict CORS to specific origins only
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
     "https://aesp-frontend.vercel.app",
 ]
 
