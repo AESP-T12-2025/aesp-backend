@@ -6,6 +6,9 @@ from app.core.deps import get_current_user
 from app.models.user import User
 from app.models.gamification import UserDailyStats
 from datetime import datetime, timedelta
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
@@ -29,35 +32,36 @@ def get_weekly_stats(
     start_of_week = today - timedelta(days=today.weekday())
     end_of_week = start_of_week + timedelta(days=6)
     
-    # Query daily stats for this week
+    # Query daily stats for this week - use func.date() for proper comparison
     stats = db.query(UserDailyStats).filter(
         UserDailyStats.user_id == current_user.user_id,
-        UserDailyStats.date >= start_of_week,
-        UserDailyStats.date <= end_of_week
+        func.date(UserDailyStats.date) >= start_of_week,
+        func.date(UserDailyStats.date) <= end_of_week
     ).all()
+    
+    # Debug log
+    logger.info(f"Weekly stats query: user={current_user.user_id}, week={start_of_week} to {end_of_week}, found={len(stats)} records")
     
     # Map stats to days (0=Mon, 6=Sun)
     daily_activity = [0] * 7
     total_seconds = 0
     total_words = 0
-    
-    # Get latest stat for streak
-    latest_stat = db.query(UserDailyStats).filter(
-        UserDailyStats.user_id == current_user.user_id
-    ).order_by(UserDailyStats.date.desc()).first()
-    
-    streak = latest_stat.login_streak_current if latest_stat else 0
 
     for s in stats:
         day_idx = s.date.weekday()
-        hours = round(s.speaking_duration_seconds / 3600, 1)
+        hours = round(s.speaking_duration_seconds / 60, 1)
         daily_activity[day_idx] = hours
         total_seconds += s.speaking_duration_seconds
         total_words += s.words_learned
         
     # Calculate aggregates
-    total_hours = round(total_seconds / 3600, 1)
-    xp_earned = total_words * 10
+    total_minutes = round(total_seconds / 60, 1)
+    
+    # XP = Words * 10 + Bonus XP (same as users.py)
+    xp_earned = (total_words * 10) + (current_user.bonus_xp or 0)
+    
+    # Calculate streak using same logic as users.py
+    streak = _calculate_streak(db, current_user.user_id)
     
     # Real Avg Score
     avg_score_query = db.query(func.avg(AIFeedback.grammar_score)).join(SpeakingSession).filter(
@@ -69,10 +73,10 @@ def get_weekly_stats(
     # Let's assume AI returns 0-100.
     avg_score = round(avg_score_query / 10, 1) if avg_score_query else 0.0
 
-    # Real Completed Scenarios
+    # Real Completed Scenarios (only count COMPLETED status)
     scenarios_completed = db.query(SpeakingSession).filter(
         SpeakingSession.user_id == current_user.user_id,
-        # SpeakingSession.status == "COMPLETED" # Uncomment if status is reliable
+        SpeakingSession.status == "COMPLETED"
     ).count()
     
     # Dynamic Feedback
@@ -114,7 +118,7 @@ def get_weekly_stats(
         })
 
     return {
-        "totalHours": total_hours,
+        "totalMinutes": total_minutes,
         "scenariosCompleted": scenarios_completed,
         "avgScore": avg_score,
         "streak": streak,
@@ -154,8 +158,8 @@ def get_monthly_stats(
     # 2. Query Daily Stats for this Month
     stats = db.query(UserDailyStats).filter(
         UserDailyStats.user_id == current_user.user_id,
-        UserDailyStats.date >= start_of_month,
-        UserDailyStats.date <= end_of_month
+        func.date(UserDailyStats.date) >= start_of_month,
+        func.date(UserDailyStats.date) <= end_of_month
     ).all()
 
     # 3. Aggregate Data
@@ -165,22 +169,26 @@ def get_monthly_stats(
     total_words = 0
 
     for s in stats:
-        day_idx = (s.date - start_of_month).days # 0 to 30
+        # Convert s.date (datetime) to date for subtraction
+        s_date = s.date.date() if isinstance(s.date, datetime) else s.date
+        day_idx = (s_date - start_of_month).days # 0 to 30
         if 0 <= day_idx < days_in_month:
-            hours = round(s.speaking_duration_seconds / 3600, 1)
+            hours = round(s.speaking_duration_seconds / 60, 1)
             daily_activity[day_idx] = hours
             total_seconds += s.speaking_duration_seconds
             total_words += s.words_learned
 
-    total_hours = round(total_seconds / 3600, 1)
-    xp_earned = total_words * 10
+    total_minutes = round(total_seconds / 60, 1)
+    
+    # XP = Words * 10 + Bonus XP (same as users.py)
+    xp_earned = (total_words * 10) + (current_user.bonus_xp or 0)
 
-    # 4. Count Completed Scenarios in this Month
+    # 4. Count Completed Scenarios in this Month (only COMPLETED)
     scenarios_completed = db.query(SpeakingSession).filter(
         SpeakingSession.user_id == current_user.user_id,
         SpeakingSession.start_time >= start_of_month,
-        SpeakingSession.start_time <= end_of_month
-        # SpeakingSession.status == "COMPLETED" 
+        SpeakingSession.start_time <= end_of_month,
+        SpeakingSession.status == "COMPLETED"
     ).count()
 
     # 5. Average Score (All time or this month? Let's do this month)
@@ -192,11 +200,8 @@ def get_monthly_stats(
     
     avg_score = round(avg_score_query / 10, 1) if avg_score_query else 0.0
 
-    # 6. Streak (Current streak is global, not monthly specific, but we can return it)
-    streak_stat = db.query(UserDailyStats).filter(
-        UserDailyStats.user_id == current_user.user_id
-    ).order_by(UserDailyStats.date.desc()).first()
-    streak = streak_stat.login_streak_current if streak_stat else 0
+    # 6. Streak using same logic as users.py
+    streak = _calculate_streak(db, current_user.user_id)
 
     # 7. Comparison (vs Previous Month)
     # Start/End of Prev Month
@@ -209,19 +214,19 @@ def get_monthly_stats(
         UserDailyStats.date <= end_of_prev_month
     ).scalar() or 0
     
-    prev_month_hours = round(prev_month_seconds / 3600, 1)
-    hours_diff = round(total_hours - prev_month_hours, 1)
+    prev_month_minutes = round(prev_month_seconds / 60, 1)
+    minutes_diff = round(total_minutes - prev_month_minutes, 1)
 
     return {
-        "totalHours": total_hours,
+        "totalMinutes": total_minutes,
         "scenariosCompleted": scenarios_completed,
         "avgScore": avg_score,
         "streak": streak,
         "xpEarned": xp_earned,
-        "dailyActivity": daily_activity, # Array of hours for each day of month
+        "dailyActivity": daily_activity, # Array of minutes for each day of month
         "comparison": {
-            "prevMonthHours": prev_month_hours,
-            "diff": hours_diff
+            "prevMonthMinutes": prev_month_minutes,
+            "diff": minutes_diff
         }
     }
 
@@ -641,3 +646,36 @@ def request_report_email(
         "period": period,
         "note": "Email service integration pending (school project placeholder)"
     }
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def _calculate_streak(db: Session, user_id: int) -> int:
+    """
+    Calculate consecutive learning days for a user.
+    Same logic as users.py for consistency.
+    
+    A day counts if user has any speaking duration or words learned.
+    """
+    from app.models.gamification import UserDailyStats
+    
+    today = datetime.now().date()
+    streak = 0
+    check_date = today
+    max_streak = 365  # Safety limit
+    
+    while streak < max_streak:
+        day_stat = db.query(UserDailyStats).filter(
+            UserDailyStats.user_id == user_id,
+            func.date(UserDailyStats.date) == check_date
+        ).first()
+        
+        if day_stat and (day_stat.speaking_duration_seconds > 0 or day_stat.words_learned > 0):
+            streak += 1
+            check_date -= timedelta(days=1)
+        else:
+            break
+    
+    return streak
