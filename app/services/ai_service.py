@@ -46,7 +46,7 @@ class GeminiService:
         - Speech analysis with detailed feedback
     """
     
-    def __init__(self, model_name: str = "gemini-2.0-flash"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         """
         Initialize Gemini service.
         
