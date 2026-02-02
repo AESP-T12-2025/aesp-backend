@@ -140,7 +140,7 @@ async def leave_session(
 # =============================================================================
 
 @router.websocket("/ws/{token}")
-async def peer_websocket(websocket: WebSocket, token: str, db: Session = Depends(get_db)):
+async def peer_websocket(websocket: WebSocket, token: str):
     """
     WebSocket endpoint for peer practice.
     
@@ -149,20 +149,34 @@ async def peer_websocket(websocket: WebSocket, token: str, db: Session = Depends
     2. Join waiting queue
     3. Get matched with another user
     4. Exchange messages in real-time
+    
+    NOTE: We don't use Depends(get_db) here because WebSocket connections
+    are long-lived and would hold DB connections for too long.
+    Instead, we create short-lived DB sessions when needed.
     """
+    from app.core.database import SessionLocal
+    
     await websocket.accept()
     
-    # Authenticate user from token
+    # Authenticate user from token using a short-lived DB session
+    user_id = None
     try:
         from app.core.security import decode_access_token
         payload = decode_access_token(token)
         email = payload.get("sub")  # Token contains email, not user_id
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            await websocket.send_json({"type": "error", "message": "User not found"})
-            await websocket.close()
-            return
-        user_id = user.user_id
+        
+        # Short-lived DB session for auth
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.email == email).first()
+            if not user:
+                await websocket.send_json({"type": "error", "message": "User not found"})
+                await websocket.close()
+                return
+            user_id = user.user_id
+        finally:
+            db.close()
+            
     except Exception as e:
         logger.error(f"Token decode error: {e}")
         await websocket.send_json({"type": "error", "message": "Invalid token"})
@@ -183,8 +197,8 @@ async def peer_websocket(websocket: WebSocket, token: str, db: Session = Depends
         # Add to waiting queue
         waiting_queue[user_id] = websocket
         
-        # Try to match with someone
-        matched = await try_match_users(user_id, db)
+        # Try to match with someone (uses its own DB session)
+        matched = await try_match_users(user_id)
         
         if not matched:
             await websocket.send_json({
@@ -196,7 +210,7 @@ async def peer_websocket(websocket: WebSocket, token: str, db: Session = Depends
         # Listen for messages
         while True:
             data = await websocket.receive_json()
-            await handle_message(user_id, data, db)
+            await handle_message(user_id, data)
             
     except WebSocketDisconnect:
         logger.info(f"Peer WS disconnected: user {user_id}")
@@ -206,8 +220,10 @@ async def peer_websocket(websocket: WebSocket, token: str, db: Session = Depends
         await cleanup_user(user_id)
 
 
-async def try_match_users(user_id: int, db: Session) -> bool:
+async def try_match_users(user_id: int) -> bool:
     """Try to match user with someone in queue."""
+    from app.core.database import SessionLocal
+    
     if len(waiting_queue) < 2:
         return False
     
@@ -229,9 +245,15 @@ async def try_match_users(user_id: int, db: Session) -> bool:
             user_sessions[user_id] = session.session_id
             user_sessions[other_id] = session.session_id
             
-            # Get user info
-            user1 = db.query(User).filter(User.user_id == user_id).first()
-            user2 = db.query(User).filter(User.user_id == other_id).first()
+            # Get user info using short-lived DB session
+            db = SessionLocal()
+            try:
+                user1 = db.query(User).filter(User.user_id == user_id).first()
+                user2 = db.query(User).filter(User.user_id == other_id).first()
+                user1_name = user1.full_name if user1 else "Unknown"
+                user2_name = user2.full_name if user2 else "Unknown"
+            finally:
+                db.close()
             
             # Notify both users
             match_msg_1 = {
@@ -239,10 +261,10 @@ async def try_match_users(user_id: int, db: Session) -> bool:
                 "session_id": session.session_id,
                 "partner": {
                     "user_id": other_id,
-                    "full_name": user2.full_name if user2 else "Unknown"
+                    "full_name": user2_name
                 },
                 "topic": session.topic,
-                "message": f"Đã ghép đôi với {user2.full_name if user2 else 'Unknown'}!"
+                "message": f"Đã ghép đôi với {user2_name}!"
             }
             
             match_msg_2 = {
@@ -250,10 +272,10 @@ async def try_match_users(user_id: int, db: Session) -> bool:
                 "session_id": session.session_id,
                 "partner": {
                     "user_id": user_id,
-                    "full_name": user1.full_name if user1 else "Unknown"
+                    "full_name": user1_name
                 },
                 "topic": session.topic,
-                "message": f"Đã ghép đôi với {user1.full_name if user1 else 'Unknown'}!"
+                "message": f"Đã ghép đôi với {user1_name}!"
             }
             
             try:
@@ -268,7 +290,7 @@ async def try_match_users(user_id: int, db: Session) -> bool:
     return False
 
 
-async def handle_message(user_id: int, data: dict, db: Session):
+async def handle_message(user_id: int, data: dict):
     """Handle incoming message from user."""
     msg_type = data.get("type", "chat")
     
