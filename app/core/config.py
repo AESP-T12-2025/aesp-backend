@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     
     # AI
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    OAUTH_REDIRECT_URI: str = os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
 
     class Config:
         env_file = ".env"

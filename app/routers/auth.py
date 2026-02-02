@@ -100,28 +100,35 @@ async def google_callback(
     Issue #51: Handle Google OAuth callback.
     
     Google redirects here after user authentication.
+    Redirects to frontend with token or error.
     """
+    import os
+    from fastapi.responses import RedirectResponse
+    
+    # Frontend URL for redirect
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    
     if error:
-        raise HTTPException(400, f"OAuth error: {error}")
+        return RedirectResponse(url=f"{frontend_url}/login?error={error}")
     
     if not code:
-        raise HTTPException(400, "Authorization code is required")
+        return RedirectResponse(url=f"{frontend_url}/login?error=missing_code")
     
     # Validate state (if provided)
     if state:
         state_data = oauth_service.validate_state(state)
         if not state_data:
-            raise HTTPException(400, "Invalid or expired state parameter")
+            return RedirectResponse(url=f"{frontend_url}/login?error=invalid_state")
     
     # Exchange code for tokens
     tokens = await oauth_service.exchange_google_code(code)
     if not tokens:
-        raise HTTPException(401, "Failed to exchange authorization code")
+        return RedirectResponse(url=f"{frontend_url}/login?error=token_exchange_failed")
     
     # Get user info
     user_info = await oauth_service.get_google_user_info(tokens.access_token)
     if not user_info:
-        raise HTTPException(401, "Failed to get user info from Google")
+        return RedirectResponse(url=f"{frontend_url}/login?error=user_info_failed")
     
     # Find or create user
     user = db.query(User).filter(User.email == user_info.email).first()
@@ -141,7 +148,7 @@ async def google_callback(
     
     # Check if account is disabled
     if not user.is_active:
-        raise HTTPException(403, "Account is disabled")
+        return RedirectResponse(url=f"{frontend_url}/login?error=account_disabled")
     
     # Link Google account
     oauth_service.link_oauth_account(
@@ -156,15 +163,8 @@ async def google_callback(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
     
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.user_id,
-            "email": user.email,
-            "full_name": user.full_name
-        }
-    }
+    # Redirect to frontend with token
+    return RedirectResponse(url=f"{frontend_url}/login?token={access_token}")
 
 
 @router.post("/auth/google/token")
