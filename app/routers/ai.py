@@ -6,9 +6,10 @@ AI-powered endpoints for speech analysis, chat, and TTS.
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
 from app.core.exceptions import ValidationException
@@ -361,3 +362,241 @@ def _update_challenge_progress(
         logger.debug("Gamification module not available")
     except Exception as e:
         logger.error(f"Error updating challenge progress: {e}")
+
+
+# =============================================================================
+# SESSION MANAGEMENT ENDPOINTS
+# =============================================================================
+
+class StartSessionRequest(BaseModel):
+    """Request schema for starting a practice session."""
+    scenario_id: int
+
+
+class CompleteSessionRequest(BaseModel):
+    """Request schema for completing a practice session."""
+    session_id: int
+    messages_count: int = Field(default=0, ge=0)
+
+
+class SessionSummary(BaseModel):
+    """Response schema for session completion."""
+    session_id: int
+    score: int
+    duration_minutes: float
+    messages_count: int
+    xp_earned: int
+
+
+@router.post("/session/start")
+def start_practice_session(
+    request: StartSessionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Start a new AI practice session for a scenario.
+    
+    Creates a new SpeakingSession with status IN_PROGRESS.
+    Returns session_id to be used for tracking and completion.
+    """
+    # Verify scenario exists
+    scenario = db.query(Scenario).filter(
+        Scenario.scenario_id == request.scenario_id
+    ).first()
+    
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    # Create new session with explicit start_time
+    session = SpeakingSession(
+        user_id=current_user.user_id,
+        scenario_id=request.scenario_id,
+        status="IN_PROGRESS",
+        start_time=datetime.now(timezone.utc)  # Set explicitly for SQLite compatibility
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    
+    logger.info(f"Started practice session {session.session_id} for user {current_user.user_id}")
+    
+    return {
+        "session_id": session.session_id,
+        "scenario_id": request.scenario_id,
+        "started_at": session.start_time.isoformat() if session.start_time else None
+    }
+
+
+@router.post("/session/complete", response_model=SessionSummary)
+def complete_practice_session(
+    request: CompleteSessionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    Complete an AI practice session.
+    
+    - Updates session status to COMPLETED
+    - Calculates final score from AI feedbacks
+    - Updates gamification (challenges, streak, XP)
+    - Returns session summary with XP earned
+    """
+    # Find session and ensure all columns are loaded
+    session = db.query(SpeakingSession).filter(
+        SpeakingSession.session_id == request.session_id,
+        SpeakingSession.user_id == current_user.user_id
+    ).first()
+    
+    # Refresh to ensure start_time is loaded from DB
+    if session:
+        db.refresh(session)
+        logger.info(f"Session loaded: id={session.session_id}, start_time={session.start_time}")
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if session.status == "COMPLETED":
+        raise HTTPException(status_code=400, detail="Session already completed")
+    
+    # 1. Update session - save end_time BEFORE any DB operations
+    end_time = datetime.now(timezone.utc)
+    session.end_time = end_time
+    session.status = "COMPLETED"
+    
+    # 2. Calculate duration BEFORE flush (start_time should be loaded already)
+    duration_seconds = 0
+    if session.start_time:
+        start = session.start_time
+        
+        # Make start timezone-aware if needed
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+            
+        duration_seconds = max(0, int((end_time - start).total_seconds()))
+        logger.info(f"Duration calc: start={start}, end={end_time}, seconds={duration_seconds}")
+    
+    # 3. Calculate score from AI feedbacks
+    feedbacks = db.query(AIFeedback).filter(
+        AIFeedback.session_id == request.session_id
+    ).all()
+    
+    if feedbacks:
+        total_score = sum(
+            (f.grammar_score + f.pronunciation_score + f.fluency_score) 
+            for f in feedbacks
+        )
+        session.score = total_score // (len(feedbacks) * 3)
+    else:
+        # Base score if no feedback (just chatted)
+        session.score = 70 + min(request.messages_count * 2, 20)  # 70-90 based on engagement
+    
+    # 4. Calculate XP earned
+    xp_earned = 10 + (request.messages_count * 2)  # Base 10 + 2 per message
+    
+    # 5. Update user bonus_xp
+    current_user.bonus_xp = (current_user.bonus_xp or 0) + xp_earned
+    
+    # 6. Update UserDailyStats (CRITICAL for analytics sync)
+    today = datetime.now(timezone.utc).date()
+    daily_stat = db.query(UserDailyStats).filter(
+        UserDailyStats.user_id == current_user.user_id,
+        func.date(UserDailyStats.date) == today
+    ).first()
+    
+    if not daily_stat:
+        # Check yesterday's streak
+        yesterday = today - timedelta(days=1)
+        yesterday_stat = db.query(UserDailyStats).filter(
+            UserDailyStats.user_id == current_user.user_id,
+            func.date(UserDailyStats.date) == yesterday
+        ).first()
+        
+        # Calculate new streak
+        if yesterday_stat and yesterday_stat.login_streak_current:
+            new_streak = yesterday_stat.login_streak_current + 1
+        else:
+            new_streak = 1
+        
+        # Create new daily stat
+        daily_stat = UserDailyStats(
+            user_id=current_user.user_id,
+            date=today,
+            speaking_duration_seconds=duration_seconds,
+            words_learned=request.messages_count * 5,  # Estimate words learned
+            login_streak_current=new_streak
+        )
+        db.add(daily_stat)
+    else:
+        # Update existing stat
+        daily_stat.speaking_duration_seconds = (daily_stat.speaking_duration_seconds or 0) + duration_seconds
+        daily_stat.words_learned = (daily_stat.words_learned or 0) + (request.messages_count * 5)
+        # Streak already set for today, don't reset
+    
+    # 7. Update challenges progress (for Challenges page)
+    try:
+        from app.routers.gamification import update_user_challenge_progress
+        
+        # Update SPEAKING_TIME challenge (in minutes)
+        speaking_minutes = duration_seconds // 60
+        if speaking_minutes > 0:
+            update_user_challenge_progress(db, current_user.user_id, "SPEAKING_TIME", speaking_minutes)
+        
+        # Update VOCAB_COUNT challenge
+        words_count = request.messages_count * 5
+        if words_count > 0:
+            update_user_challenge_progress(db, current_user.user_id, "VOCAB_COUNT", words_count)
+        
+        # Update STREAK challenge
+        update_user_challenge_progress(db, current_user.user_id, "STREAK", 1)
+        
+    except Exception as e:
+        logger.error(f"Error updating challenges (non-critical): {e}")
+    
+    # 8. Commit all changes together
+    db.commit()
+    
+    logger.info(f"Completed session {session.session_id}: score={session.score}, xp={xp_earned}, duration={duration_seconds}s")
+    
+    return SessionSummary(
+        session_id=session.session_id,
+        score=session.score,
+        duration_minutes=round(duration_seconds / 60, 1),
+        messages_count=request.messages_count,
+        xp_earned=xp_earned
+    )
+
+
+def _update_user_streak(db: Session, user_id: int) -> None:
+    """
+    Update user's learning streak based on daily activity.
+    
+    If user has activity today, increment streak.
+    If user missed yesterday, reset streak to 1.
+    """
+    try:
+        today = datetime.now(timezone.utc).date()
+        
+        # Check if user already has stats for today
+        daily_stat = db.query(UserDailyStats).filter(
+            UserDailyStats.user_id == user_id,
+            UserDailyStats.date == today
+        ).first()
+        
+        if not daily_stat:
+            # Create new daily stat
+            daily_stat = UserDailyStats(
+                user_id=user_id,
+                date=today,
+                lessons_completed=1
+            )
+            db.add(daily_stat)
+        else:
+            daily_stat.lessons_completed = (daily_stat.lessons_completed or 0) + 1
+        
+        # Update streak in gamification challenges
+        from app.routers.gamification import update_user_challenge_progress
+        update_user_challenge_progress(db, user_id, "STREAK", 1)
+        
+    except Exception as e:
+        logger.error(f"Error updating streak: {e}")

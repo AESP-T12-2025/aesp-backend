@@ -144,25 +144,44 @@ def get_my_progress(
 def update_user_challenge_progress(db: Session, user_id: int, metric_type: str, increment_value: int):
     """
     metric_type matches ChallengeType enum values: 
-    'VOCAB_COUNT', 'STREAK', 'SPEAKING_TIME', 'LESSON_COMPLETED'
-    """
-    from app.models.gamification import ChallengeType # ensure import
+    'VOCAB_COUNT', 'STREAK', 'SPEAKING_TIME'
     
-    # Find all active challenges for this user of this type
-    user_challenges = db.query(UserChallenge).join(Challenge).filter(
-        UserChallenge.user_id == user_id,
-        UserChallenge.is_completed == False,
+    Auto-joins user to challenges if not already joined.
+    """
+    from app.models.gamification import ChallengeType
+    
+    # Find all challenges of this type
+    all_challenges = db.query(Challenge).filter(
         Challenge.challenge_type == metric_type
     ).all()
     
-    for uc in user_challenges:
-        uc.current_progress += increment_value
+    for challenge in all_challenges:
+        # Check if user has joined this challenge
+        user_challenge = db.query(UserChallenge).filter(
+            UserChallenge.user_id == user_id,
+            UserChallenge.challenge_id == challenge.id
+        ).first()
         
-        # Check completion
-        if uc.current_progress >= uc.challenge.target_value:
-            uc.current_progress = uc.challenge.target_value # Cap it
-            uc.is_completed = True
-            # Award points? (Logic can be added here or strictly visual)
-            # e.g., user.xp += uc.challenge.points_reward
+        if not user_challenge:
+            # Auto-join user to this challenge
+            user_challenge = UserChallenge(
+                user_id=user_id,
+                challenge_id=challenge.id,
+                current_progress=0,
+                is_completed=False,
+                is_claimed=False
+            )
+            db.add(user_challenge)
+            db.flush()  # Get ID without committing
+        
+        # Update progress if not completed
+        if not user_challenge.is_completed:
+            user_challenge.current_progress += increment_value
             
-    db.commit()
+            # Check completion
+            if user_challenge.current_progress >= challenge.target_value:
+                user_challenge.current_progress = challenge.target_value  # Cap it
+                user_challenge.is_completed = True
+    
+    # Don't commit here - let caller commit
+
