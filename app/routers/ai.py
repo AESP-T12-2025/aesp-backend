@@ -109,53 +109,58 @@ async def conversation(
 ):
     """
     Have a conversation within a specific scenario context.
-    
-    - Loads scenario info to build appropriate AI persona
-    - Uses conversation history for coherent responses
-    - AI responds as a practice partner in English
     """
-    # Load scenario for context
-    scenario = db.query(Scenario).filter(Scenario.scenario_id == request.scenario_id).first()
-    
-    if not scenario:
-        raise HTTPException(status_code=404, detail="Scenario not found")
-    
-    # Build conversation context
-    history_text = ""
-    for msg in request.context[-6:]:  # Last 6 messages for context
-        role = "User" if msg.role == "user" else "AI"
-        history_text += f"{role}: {msg.content}\n"
-    
-    # Build system prompt
-    system_context = f"""You are an English conversation practice partner. 
-The learner is practicing the scenario: "{scenario.title}".
-Scenario description: {scenario.description or 'General English practice'}
-Difficulty level: {scenario.difficulty_level}
+    try:
+        # Load scenario for context
+        scenario = db.query(Scenario).filter(Scenario.scenario_id == request.scenario_id).first()
+        
+        scenario_title = scenario.title if scenario else "English Practice"
+        scenario_desc = scenario.topic.description if (scenario and scenario.topic) else "General English conversation practice"
+        difficulty = scenario.difficulty_level if scenario else "Any"
+
+        # Build conversation context from history
+        history_text = ""
+        if request.context:
+            for msg in request.context[-6:]:  # Last 6 messages for context
+                role = "User" if msg.role == "user" else "AI"
+                history_text += f"{role}: {msg.content}\n"
+        
+        # Build system prompt
+        system_context = f"""You are an English conversation practice partner. 
+Roleplay Scenario: "{scenario_title}"
+Description: {scenario_desc}
+Learner Level: {difficulty}
 
 Your role:
-- Respond naturally in English
-- Keep responses conversational and encouraging
-- If the learner makes grammar mistakes, gently correct them
-- Ask follow-up questions to keep the conversation going
-- Match the difficulty level ({scenario.difficulty_level})
+- Speak naturally and keep the conversation flowing.
+- Be encouraging and helpful.
+- Gently correct small grammar errors if they appear.
+- Ask one short follow-up question.
+- Match the learner's level ({difficulty}).
 
-Recent conversation:
+Recent history:
 {history_text}
-
-Now respond to the user's latest message naturally."""
-
-    try:
+"""
+        # Call AI service
         response = await ai_service.chat_with_context(
             request.message,
             system_context
         )
-        return {"response": response, "scenario_title": scenario.title}
-    except Exception as e:
-        logger.error(f"Conversation error: {e}")
+        
         return {
-            "response": "I understand! That's a great point. Let me think about that... What else would you like to discuss about this topic?",
-            "scenario_title": scenario.title,
-            "fallback": True
+            "response": response, 
+            "scenario_title": scenario_title,
+            "success": True
+        }
+
+    except Exception as e:
+        logger.error(f"Critical conversation error: {e}", exc_info=True)
+        # Always return a valid response object to the frontend
+        return {
+            "response": "That's a great point! I'm listening. Could you tell me more about that? (Hệ thống đang bận, hãy thử lại sau giây lát)",
+            "scenario_title": scenario_title if 'scenario_title' in locals() else "English Practice",
+            "fallback": True,
+            "success": False
         }
 
 

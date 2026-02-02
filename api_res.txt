@@ -1,0 +1,1 @@
+{"response":"QUOTA_LIMIT: Phía Google đang giới hạn số lượt trả lời của tài khoản này. Vui lòng đợi 30 giây rồi nhắn lại nhé!","scenario_title":"Scenario for Job Interview TEST 1","success":true}

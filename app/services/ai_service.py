@@ -46,7 +46,7 @@ class GeminiService:
         - Speech analysis with detailed feedback
     """
     
-    def __init__(self, model_name: str = "gemini-2.0-flash"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         """
         Initialize Gemini service.
         
@@ -85,33 +85,39 @@ class GeminiService:
     ) -> str:
         """
         Generate a response based on user message and context.
-        
-        Args:
-            message: User's message
-            context: Conversation context/persona
-            
-        Returns:
-            AI-generated response
         """
         if not self.model:
-            logger.error("Gemini model not initialized")
-            return "Sorry, AI service is currently unavailable."
+            return "Sorry, AI service is currently unavailable. Please check your configuration."
         
         try:
             prompt = f"""
-            Context: {context}
-            
-            User message: {message}
-            
-            Respond as a friendly English tutor or the specific role defined in the context. 
-            Keep the response concise (under 50 words) and helpful for learning.
-            """
+SYSTEM CONTEXT:
+{context}
+
+USER MESSAGE:
+{message}
+
+INSTRUCTIONS:
+1. Act according to the SYSTEM CONTEXT.
+2. Keep your response natural and helpful for an English learner.
+3. Keep it concise (maximum 60 words).
+"""
             response = self.model.generate_content(prompt)
-            return response.text
+            
+            try:
+                if response and response.text:
+                    return response.text.strip()
+            except ValueError:
+                return "I'm sorry, I can't answer that. Let's talk about something else!"
+            
+            return "I'm listening! Please tell me more."
             
         except Exception as e:
             logger.error(f"Gemini chat error: {e}", exc_info=True)
-            return "Sorry, I'm having trouble processing your request right now."
+            error_msg = str(e).lower()
+            if "exhausted" in error_msg or "429" in error_msg or "quota" in error_msg:
+                return "QUOTA_LIMIT: Phía Google đang giới hạn số lượt trả lời của tài khoản này. Vui lòng đợi 30 giây rồi nhắn lại nhé!"
+            return "AI_ERROR: Rất tiếc, mình chưa thể trả lời lúc này. Bạn hãy thử nhắn lại sau vài giây hoặc kiểm tra lại kết nối nhé!"
 
     async def generate_response_suggestion(
         self, 
