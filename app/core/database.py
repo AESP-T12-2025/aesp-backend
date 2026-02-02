@@ -25,12 +25,21 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL must be set in environment variables")
 
 # Create SQLAlchemy engine with connection pooling
+# Settings optimized for Render/Neon free tier with limited connections
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,      # Check connection vitality before usage
-    pool_recycle=300,        # Recycle connections every 5 minutes
-    pool_size=5,             # Maintain a pool of connections
-    max_overflow=10,         # Allow temporary overflow
+    pool_pre_ping=True,      # Check connection vitality before usage (critical!)
+    pool_recycle=60,         # Recycle connections every 60 seconds (shorter for free tier)
+    pool_size=3,             # Smaller pool for free tier limits
+    max_overflow=5,          # Allow temporary overflow
+    pool_timeout=30,         # Wait max 30 seconds for connection
+    connect_args={
+        "connect_timeout": 10,     # Connection timeout
+        "keepalives": 1,           # Enable TCP keepalives
+        "keepalives_idle": 30,     # Start keepalive after 30 seconds idle
+        "keepalives_interval": 10, # Keepalive interval
+        "keepalives_count": 5,     # Number of keepalive probes
+    },
     echo=False,              # Set to True for SQL query logging in dev
 )
 
@@ -38,7 +47,8 @@ engine = create_engine(
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
-    bind=engine
+    bind=engine,
+    expire_on_commit=False,  # Don't expire objects after commit (helps with detached objects)
 )
 
 # Base class for all models
